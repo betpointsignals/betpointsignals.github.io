@@ -1,7 +1,7 @@
 {
   "name": "Bet Point Signals",
   "short_name": "BetPoint",
-  "start_url": "/",
+  "start_url": "/signal.html",
   "display": "standalone",
   "background_color": "#f8f8f8",
   "theme_color": "#007bff",
