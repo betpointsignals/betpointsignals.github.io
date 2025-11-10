@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Signal Alerts — Bet Point</title>
+
+<!-- OneSignal SDK -->
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+
+<style>
+  body { font-family: sans-serif; padding: 20px; }
+  #entry, #content, #errorMsg { display: none; }
+  #errorMsg { color: red; }
+</style>
+
+<script>
+let rowId = null;
+let deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+let playerId = null;
+let linkId = null;
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const params = new URLSearchParams(window.location.search);
+  linkId = params.get('link_id');
+  rowId = params.get('row_id'); // optional auto rowId
+
+  if (!linkId) {
+    document.getElementById('errorMsg').textContent = 'Invalid or missing link.';
+    document.getElementById('errorMsg').style.display = 'block';
+    return;
+  }
+
+  document.getElementById('linkDisplay').textContent = `Link ID: ${linkId}`;
+
+  if (rowId) {
+    // If rowId is already in URL, skip input
+    verifyLink();
+  } else {
+    // Otherwise show input
+    document.getElementById('entry').style.display = 'block';
+  }
+});
+
+async function submitRowId() {
+  rowId = document.getElementById('rowIdInput').value.trim();
+  if (!rowId) return alert('Please enter your Row ID.');
+  verifyLink();
+}
+
+async function verifyLink() {
+  try {
+    const res = await fetch('https://YOUR_BACKEND_URL/verify-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ link_id: linkId, row_id: rowId })
+    });
+    const data = await res.json();
+
+    if (data.valid) {
+      document.getElementById('entry').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      initOneSignal();
+    } else {
+      document.getElementById('errorMsg').textContent = 'Invalid or expired link for this Row ID.';
+      document.getElementById('errorMsg').style.display = 'block';
+    }
+  } catch (err) {
+    console.error(err);
+    document.getElementById('errorMsg').textContent = 'Server error verifying link.';
+    document.getElementById('errorMsg').style.display = 'block';
+  }
+}
+
+function initOneSignal() {
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.init({
+      appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
+      notifyButton: { enable: false }
+    });
+
+    // Handle subscription
+    const isSubscribed = await OneSignal.isPushNotificationsEnabled();
+    if (isSubscribed) {
+      playerId = await OneSignal.getUserId();
+      registerDevice();
+    }
+
+    OneSignal.on('subscriptionChange', async function(isSubscribed) {
+      if (isSubscribed) {
+        playerId = await OneSignal.getUserId();
+        registerDevice();
+      }
+    });
+  });
+}
+
+function registerDevice() {
+  if (!rowId || !playerId) return;
+  fetch('https://YOUR_BACKEND_URL/register-device', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ rowId, playerId, deviceType })
+  }).then(res => res.json()).then(console.log);
+}
+</script>
+</head>
+
+<body>
+  <h2>Signal Alerts — Bet Point</h2>
+  <p id="linkDisplay"></p>
+  <p id="errorMsg"></p>
+
+  <div id="entry">
+    <input type="text" id="rowIdInput" placeholder="Enter your Row ID" />
+    <button onclick="submitRowId()">Submit</button>
+  </div>
+
+  <div id="content">
+    <iframe 
+      src="https://bet-point.appsmith.com/app/signal/page1-68b217383a43874978908b5c?embed=true" 
+      title="Bet Point Signals App"
+      style="width:100%; height:80vh; border:none;">
+    </iframe>
+  </div>
+</body>
+</html>
+
+
