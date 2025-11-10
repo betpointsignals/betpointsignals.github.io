@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Signal Alerts — Bet Point</title>
 
+<!-- PWA manifest -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#007bff">
+
 <!-- OneSignal SDK -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
@@ -34,10 +38,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('linkDisplay').textContent = `Link ID: ${linkId}`;
 
   if (rowId) {
-    // If rowId is already in URL, skip input
     verifyLink();
   } else {
-    // Otherwise show input
     document.getElementById('entry').style.display = 'block';
   }
 });
@@ -80,7 +82,6 @@ function initOneSignal() {
       notifyButton: { enable: false }
     });
 
-    // Handle subscription
     const isSubscribed = await OneSignal.isPushNotificationsEnabled();
     if (isSubscribed) {
       playerId = await OneSignal.getUserId();
@@ -126,5 +127,6 @@ function registerDevice() {
   </div>
 </body>
 </html>
+
 
 
