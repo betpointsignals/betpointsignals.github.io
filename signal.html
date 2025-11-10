@@ -15,7 +15,9 @@
 <style>
   body { font-family: sans-serif; padding: 20px; }
   #entry, #content, #errorMsg { display: none; }
-  #errorMsg { color: red; }
+  #errorMsg { color: red; margin-top: 10px; }
+  input { padding: 8px; margin-right: 8px; }
+  button { padding: 8px 12px; }
 </style>
 
 <script>
@@ -24,56 +26,62 @@ let deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 let playerId = null;
 let linkId = null;
 
-window.addEventListener('DOMContentLoaded', async () => {
+// On page load
+window.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(window.location.search);
+
+  // Try to get linkId from URL
   linkId = params.get('link_id');
-  rowId = params.get('row_id'); // optional auto rowId
 
-  if (!linkId) {
-    document.getElementById('errorMsg').textContent = 'Invalid or missing link.';
-    document.getElementById('errorMsg').style.display = 'block';
-    return;
-  }
+  // Fallback to localStorage
+  if (!linkId) linkId = localStorage.getItem('linkId');
 
-  document.getElementById('linkDisplay').textContent = `Link ID: ${linkId}`;
-
-  if (rowId) {
-    verifyLink();
+  // If we have linkId, store it in localStorage and show content
+  if (linkId) {
+    localStorage.setItem('linkId', linkId);
+    document.getElementById('entry').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+    initOneSignal();
   } else {
+    // Otherwise show Row ID input
     document.getElementById('entry').style.display = 'block';
   }
 });
 
+// User submits Row ID
 async function submitRowId() {
   rowId = document.getElementById('rowIdInput').value.trim();
   if (!rowId) return alert('Please enter your Row ID.');
-  verifyLink();
-}
 
-async function verifyLink() {
   try {
-    const res = await fetch('https://YOUR_BACKEND_URL/verify-link', {
+    // Ask backend for valid link_id using the Row ID
+    const res = await fetch('https://YOUR_BACKEND_URL/get-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ link_id: linkId, row_id: rowId })
+      body: JSON.stringify({ row_id: rowId })
     });
     const data = await res.json();
 
-    if (data.valid) {
+    if (data.link_id) {
+      linkId = data.link_id;
+      // Store linkId in localStorage for future homescreen launches
+      localStorage.setItem('linkId', linkId);
+
       document.getElementById('entry').style.display = 'none';
       document.getElementById('content').style.display = 'block';
       initOneSignal();
     } else {
-      document.getElementById('errorMsg').textContent = 'Invalid or expired link for this Row ID.';
+      document.getElementById('errorMsg').textContent = 'Invalid Row ID.';
       document.getElementById('errorMsg').style.display = 'block';
     }
   } catch (err) {
     console.error(err);
-    document.getElementById('errorMsg').textContent = 'Server error verifying link.';
+    document.getElementById('errorMsg').textContent = 'Server error verifying Row ID.';
     document.getElementById('errorMsg').style.display = 'block';
   }
 }
 
+// OneSignal initialization
 function initOneSignal() {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function(OneSignal) {
@@ -97,12 +105,13 @@ function initOneSignal() {
   });
 }
 
+// Register device with backend
 function registerDevice() {
-  if (!rowId || !playerId) return;
+  if (!rowId && !linkId) return;
   fetch('https://YOUR_BACKEND_URL/register-device', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ rowId, playerId, deviceType })
+    body: JSON.stringify({ rowId, playerId, deviceType, linkId })
   }).then(res => res.json()).then(console.log);
 }
 </script>
@@ -110,7 +119,6 @@ function registerDevice() {
 
 <body>
   <h2>Signal Alerts — Bet Point</h2>
-  <p id="linkDisplay"></p>
   <p id="errorMsg"></p>
 
   <div id="entry">
@@ -127,6 +135,5 @@ function registerDevice() {
   </div>
 </body>
 </html>
-
 
 
