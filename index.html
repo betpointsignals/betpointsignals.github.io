@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Signal Alerts — Bet Point</title>
+
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+
+<script>
+  let rowId = null;
+  let deviceType = 'web';
+  let playerId = null;
+  let linkId = new URLSearchParams(window.location.search).get('link');
+
+  // Hide iframe until verified
+  window.onload = () => {
+    document.getElementById("appFrame").style.display = "none";
+    if (!linkId) {
+      document.body.innerHTML = "<h3>Invalid link.</h3>";
+    }
+  };
+
+  function submitRowId() {
+    rowId = document.getElementById('rowIdInput').value.trim();
+    if (!linkId || !rowId) {
+      alert("Missing link or Row ID");
+      return;
+    }
+
+    fetch('http://localhost:5000/verify-link', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({link_id: linkId, row_id: rowId})
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.valid) {
+        alert('Verified! You can now allow notifications.');
+        document.getElementById("appFrame").style.display = "block";
+        document.getElementById("authSection").style.display = "none";
+      } else {
+        alert('Invalid combination. Please check your Row ID or link.');
+      }
+    });
+  }
+
+  // OneSignal setup
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.init({
+      appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
+      notifyButton: { enable: false }
+    });
+
+    OneSignal.on('subscriptionChange', async function(isSubscribed) {
+      if (isSubscribed) {
+        playerId = await OneSignal.getUserId();
+        if (rowId && playerId) {
+          fetch('http://localhost:5000/register-device', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({rowId, playerId, deviceType})
+          }).then(res => res.json()).then(console.log);
+        }
+      }
+    });
+  });
+</script>
+
+</head>
+<body>
+<div id="authSection">
+  <h2>Enter Row ID</h2>
+  <input type="text" id="rowIdInput" placeholder="Row ID"/>
+  <button onclick="submitRowId()">Submit</button>
+</div>
+
+<iframe id="appFrame"
+        src="https://bet-point.appsmith.com/app/signal/page1-68b217383a43874978908b5c?embed=true"
+        title="Bet Point Signals App"
+        style="width:100%; height:80vh; border:none;">
+</iframe>
+
+</body>
+</html>
+
