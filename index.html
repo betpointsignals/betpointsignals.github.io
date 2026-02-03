@@ -1,119 +1,198 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Signal Alerts — Bet Point</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Signal Alerts — Bet Point</title>
 
-<!-- PWA manifest -->
-<link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#007bff">
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#007bff">
 
-<!-- OneSignal SDK -->
-<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <!-- iOS Icon -->
+  <link rel="apple-touch-icon" href="./icon-1024x1024.png">
 
-<style>
-  body { font-family: sans-serif; padding: 20px; background: #fff; color: #000; }
-  #entry, #content, #errorMsg { display: none; }
-  #errorMsg { color: red; margin-top: 10px; }
-  input { padding: 10px; margin-right: 8px; font-size: 16px; }
-  button { padding: 10px 14px; font-size: 16px; }
-</style>
+  <!-- OneSignal SDK -->
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      width: 100%;
+      font-family: Arial, sans-serif;
+      background: #000;
+    }
+
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    #loginOverlay {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 999;
+      color: #fff;
+    }
+
+    #loginOverlay img {
+      width: 96px;
+      height: 96px;
+      margin-bottom: 16px;
+    }
+
+    #loginOverlay input {
+      padding: 12px;
+      font-size: 16px;
+      width: 220px;
+      border-radius: 6px;
+      border: none;
+      margin-bottom: 12px;
+    }
+
+    #loginOverlay button {
+      padding: 12px 18px;
+      font-size: 16px;
+      border-radius: 6px;
+      border: none;
+      background: #007bff;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    #loginError {
+      color: #ff4d4d;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- LOGIN -->
+<div id="loginOverlay">
+  <img src="./icon-1024x1024.png" alt="Logo">
+  <h2>Enter Password</h2>
+  <input type="password" id="rowIdInput" placeholder="Password">
+  <button onclick="submitRowId()">Submit</button>
+  <div id="loginError"></div>
+</div>
+
+<!-- APP -->
+<iframe id="appFrame"></iframe>
 
 <script>
 let rowId = null;
-let deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
-let playerId = null;
 let linkId = null;
+let subscribedOnce = false;
 
-// On page load
+const VERIFY_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
+const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const APP_URL = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+
+/* Auto login */
 window.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('entry').style.display = 'block';
+  const savedRow = localStorage.getItem('rowId');
+  const savedLink = localStorage.getItem('linkId');
+  if (savedRow && savedLink) {
+    rowId = savedRow;
+    linkId = savedLink;
+    unlockApp();
+    initOneSignal();
+  }
 });
 
-// User submits password / Row ID
+/* Login */
 async function submitRowId() {
+  const error = document.getElementById('loginError');
   rowId = document.getElementById('rowIdInput').value.trim();
-  if (!rowId) return alert('Please enter your password.');
+  if (!rowId) return;
+
+  error.textContent = '';
 
   try {
-    // Verify with backend
-    const res = await fetch('https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link', {
+    const res = await fetch(VERIFY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ row_id: rowId })
     });
+
     const data = await res.json();
 
-    if (data.valid) {
-      linkId = data.link_id; // get linkId from backend
-      localStorage.setItem('linkId', linkId);
-
-      document.getElementById('entry').style.display = 'none';
-      document.getElementById('content').style.display = 'block';
-      initOneSignal();
-    } else {
-      document.getElementById('errorMsg').textContent = 'Invalid password.';
-      document.getElementById('errorMsg').style.display = 'block';
+    if (!data.valid) {
+      error.textContent = 'Invalid password';
+      return;
     }
-  } catch (err) {
-    console.error(err);
-    document.getElementById('errorMsg').textContent = 'Server error verifying password.';
-    document.getElementById('errorMsg').style.display = 'block';
+
+    linkId = data.link_id;
+    localStorage.setItem('rowId', rowId);
+    localStorage.setItem('linkId', linkId);
+
+    unlockApp();
+    initOneSignal();
+
+  } catch {
+    error.textContent = 'Server error';
   }
 }
 
-// OneSignal initialization
+/* Unlock iframe */
+function unlockApp() {
+  document.getElementById('loginOverlay').style.display = 'none';
+  const frame = document.getElementById('appFrame');
+  if (!frame.src) frame.src = APP_URL;
+}
+
+/* OneSignal — EXACT working method */
 function initOneSignal() {
+  if (subscribedOnce) return;
+  subscribedOnce = true;
+
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function(OneSignal) {
+
     await OneSignal.init({
       appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
+
+      /* 🔥 REQUIRED FOR GITHUB PAGES */
+      path: "/signals/",
+      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
+      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
+
       notifyButton: { enable: false }
     });
 
-    const isSubscribed = await OneSignal.isPushNotificationsEnabled();
-    if (isSubscribed) {
-      playerId = await OneSignal.getUserId();
-      registerDevice();
+    const enabled = await OneSignal.isPushNotificationsEnabled();
+
+    if (!enabled) {
+      await OneSignal.showNativePrompt();
     }
 
-    OneSignal.on('subscriptionChange', async function(isSubscribed) {
-      if (isSubscribed) {
-        playerId = await OneSignal.getUserId();
-        registerDevice();
-      }
-    });
+    const finalState = await OneSignal.isPushNotificationsEnabled();
+    if (!finalState) return;
+
+    const playerId = await OneSignal.getUserId();
+
+    fetch(REGISTER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rowId, linkId, playerId, deviceType })
+    })
+    .then(res => res.json())
+    .then(console.log)
+    .catch(console.error);
   });
 }
-
-// Register device with backend
-function registerDevice() {
-  if (!rowId || !playerId) return;
-  fetch('https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ rowId, playerId, deviceType, linkId })
-  }).then(res => res.json()).then(console.log);
-}
 </script>
-</head>
 
-<body>
-  <h2>Signal Alerts — Bet Point</h2>
-  <p id="errorMsg"></p>
-
-  <div id="entry">
-    <input type="password" id="rowIdInput" placeholder="Enter your password" />
-    <button onclick="submitRowId()">Submit</button>
-  </div>
-
-  <div id="content">
-    <iframe 
-      src="https://bet-point.appsmith.com/app/signal/page1-68b217383a43874978908b5c?embed=true" 
-      title="Bet Point Signals App"
-      style="width:100%; height:80vh; border:none;">
-    </iframe>
-  </div>
 </body>
-</html> 
+</html>
