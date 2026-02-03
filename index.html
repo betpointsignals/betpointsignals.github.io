@@ -90,19 +90,26 @@
 <iframe id="appFrame"></iframe>
 
 <script>
+/* ================= CONFIG ================= */
+
+const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
+const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+
+const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+
+/* ================= STATE ================= */
+
 let rowId = null;
 let linkId = null;
 let subscribedOnce = false;
 
-const VERIFY_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
-const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
-const APP_URL = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+/* ================= AUTO LOGIN ================= */
 
-/* Auto login */
 window.addEventListener('DOMContentLoaded', () => {
-  const savedRow = localStorage.getItem('rowId');
+  const savedRow  = localStorage.getItem('rowId');
   const savedLink = localStorage.getItem('linkId');
+
   if (savedRow && savedLink) {
     rowId = savedRow;
     linkId = savedLink;
@@ -111,7 +118,8 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-/* Login */
+/* ================= LOGIN ================= */
+
 async function submitRowId() {
   const error = document.getElementById('loginError');
   rowId = document.getElementById('rowIdInput').value.trim();
@@ -134,6 +142,7 @@ async function submitRowId() {
     }
 
     linkId = data.link_id;
+
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
 
@@ -145,25 +154,27 @@ async function submitRowId() {
   }
 }
 
-/* Unlock iframe */
+/* ================= UNLOCK APP ================= */
+
 function unlockApp() {
   document.getElementById('loginOverlay').style.display = 'none';
   const frame = document.getElementById('appFrame');
   if (!frame.src) frame.src = APP_URL;
 }
 
-/* OneSignal — EXACT working method */
+/* ================= ONESIGNAL ================= */
+
 function initOneSignal() {
   if (subscribedOnce) return;
   subscribedOnce = true;
 
   window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function(OneSignal) {
+  OneSignalDeferred.push(async function (OneSignal) {
 
     await OneSignal.init({
       appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
 
-      /* 🔥 REQUIRED FOR GITHUB PAGES */
+      /* REQUIRED FOR GITHUB PAGES */
       path: "/signals/",
       serviceWorkerPath: "signals/OneSignalSDKWorker.js",
       serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
@@ -171,8 +182,10 @@ function initOneSignal() {
       notifyButton: { enable: false }
     });
 
-    const enabled = await OneSignal.isPushNotificationsEnabled();
+    /* 🔐 SET EXTERNAL USER ID = PASSWORD */
+    await OneSignal.login(rowId);
 
+    const enabled = await OneSignal.isPushNotificationsEnabled();
     if (!enabled) {
       await OneSignal.showNativePrompt();
     }
@@ -182,10 +195,16 @@ function initOneSignal() {
 
     const playerId = await OneSignal.getUserId();
 
+    /* REGISTER DEVICE IN SUPABASE */
     fetch(REGISTER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rowId, linkId, playerId, deviceType })
+      body: JSON.stringify({
+        rowId,
+        linkId,
+        playerId,
+        deviceType
+      })
     })
     .then(res => res.json())
     .then(console.log)
@@ -196,4 +215,5 @@ function initOneSignal() {
 
 </body>
 </html>
+
 
