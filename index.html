@@ -37,45 +37,34 @@ iframe {
   align-items:center;
   z-index:999;
   color:#fff;
+  text-align:center;
+  padding:24px;
 }
 #loginOverlay img {
   width:96px;
   height:96px;
-  margin-bottom:16px;
+  margin-bottom:20px;
 }
-#loginOverlay input {
-  padding:12px;
-  font-size:16px;
-  width:220px;
-  border-radius:6px;
-  border:none;
-  margin-bottom:12px;
-}
-#loginOverlay button {
-  padding:12px 18px;
-  font-size:16px;
-  border-radius:6px;
-  border:none;
-  background:#007bff;
-  color:#fff;
-  cursor:pointer;
-}
-#loginError {
-  color:#ff4d4d;
-  margin-top:12px;
+#loginOverlay p {
+  max-width:320px;
+  line-height:1.5;
+  font-size:15px;
+  color:#ddd;
 }
 </style>
 </head>
 
 <body>
 
-<!-- LOGIN -->
+<!-- LOCK SCREEN -->
 <div id="loginOverlay">
   <img src="./icon-1024x1024.png" alt="Logo">
-  <h2>Enter Password</h2>
-  <input type="password" id="rowIdInput" placeholder="Password">
-  <button onclick="submitRowId()">Submit</button>
-  <div id="loginError"></div>
+  <p>
+    ADD THIS APP TO YOUR HOME SCREEN<br><br>
+    THEN SUBSCRIBE TO NOTIFICATIONS<br>
+    BY CLICKING THE <span style="color:#ff3b3b;font-weight:bold;">RED BELL</span><br>
+    IN THE APP
+  </p>
 </div>
 
 <!-- APP -->
@@ -83,134 +72,66 @@ iframe {
 
 <script>
 /* CONFIG */
-const VERIFY_URL   = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
 const REGISTER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device";
 const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
 const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 
-let rowId = null;
-let linkId = null;
+/* READ row_id FROM URL */
+const params = new URLSearchParams(window.location.search);
+const rowId = params.get("row_id");
 
-/* HELPER TO GET URL PARAM */
-function getRowIdFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("row_id");
-}
-
-/* AUTO LOGIN / PREFILL */
-window.addEventListener("DOMContentLoaded", async () => {
-  const urlRowId = getRowIdFromUrl();
-  const savedRow = localStorage.getItem("rowId");
-  const savedLink = localStorage.getItem("linkId");
-
-  // Only auto-login if BOTH rowId and linkId exist in localStorage
-  if (savedRow && savedLink) {
-    rowId = savedRow;
-    linkId = savedLink;
-    unlockApp();
-    await initOneSignal();
-  } else if (urlRowId) {
-    // Prefill input field but still show login overlay
-    document.getElementById("rowIdInput").value = urlRowId;
-    rowId = urlRowId;
-  }
-});
-
-/* LOGIN */
-async function submitRowId() {
-  const error = document.getElementById("loginError");
-  rowId = document.getElementById("rowIdInput").value.trim();
-  if (!rowId) return;
-
-  error.textContent = "";
-
-  try {
-    const res = await fetch(VERIFY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId })
-    });
-
-    const data = await res.json();
-    if (!data.valid) {
-      error.textContent = "Invalid password";
-      return;
-    }
-
-    linkId = data.link_id;
-    localStorage.setItem("rowId", rowId);
-    localStorage.setItem("linkId", linkId);
-
-    unlockApp();
-    await initOneSignal();
-
-  } catch {
-    error.textContent = "Server error";
-  }
-}
-
-/* UNLOCK APP */
-function unlockApp() {
-  document.getElementById("loginOverlay").style.display = "none";
-  const frame = document.getElementById("appFrame");
-  if (!frame.src) frame.src = APP_URL;
+if (!rowId) {
+  console.warn("❌ row_id missing from URL");
 }
 
 /* ONESIGNAL */
-async function initOneSignal() {
-  window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function (OneSignal) {
+window.OneSignalDeferred = window.OneSignalDeferred || [];
+OneSignalDeferred.push(async function (OneSignal) {
 
-    await OneSignal.init({
-      appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
-      path: "/signals/",
-      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton: { enable: true }
-    });
-
-    const rowIdLocal  = localStorage.getItem("rowId");
-    const linkIdLocal = localStorage.getItem("linkId");
-    if (!rowIdLocal) return;
-
-    OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
-      if (!event.current?.optedIn) return;
-
-      try {
-        // Attach external_id
-        await OneSignal.login(rowIdLocal);
-
-        // OneSignal player ID
-        const oneSignalId = OneSignal.User.onesignalId;
-        if (!oneSignalId) {
-          console.error("OneSignal ID missing");
-          return;
-        }
-
-        console.log("✅ OneSignal ID:", oneSignalId);
-
-        // Save to Supabase
-        const res = await fetch(REGISTER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rowId: rowIdLocal,
-            linkId: linkIdLocal,
-            one_signal_id: oneSignalId,
-            device_type: deviceType
-          })
-        });
-
-        const json = await res.json();
-        console.log("✅ Supabase response:", json);
-
-      } catch (err) {
-        console.error("❌ OneSignal sync error:", err);
-      }
-    });
+  await OneSignal.init({
+    appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
+    path: "/signals/",
+    serviceWorkerPath: "signals/OneSignalSDKWorker.js",
+    serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
+    notifyButton: { enable: true }
   });
-}
+
+  if (!rowId) return;
+
+  // Fire ONLY when user actually subscribes
+  OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
+    if (!event.current?.optedIn) return;
+
+    try {
+      // Attach external_id
+      await OneSignal.login(rowId);
+
+      const oneSignalId = OneSignal.User.onesignalId;
+      if (!oneSignalId) return;
+
+      console.log("✅ OneSignal ID:", oneSignalId);
+
+      // Save to Supabase
+      await fetch(REGISTER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rowId,
+          playerId: oneSignalId,
+          deviceType
+        })
+      });
+
+      // Unlock app AFTER successful subscription
+      document.getElementById("loginOverlay").style.display = "none";
+      document.getElementById("appFrame").src = APP_URL;
+
+    } catch (err) {
+      console.error("❌ OneSignal registration failed:", err);
+    }
+  });
+});
 </script>
 
 </body>
