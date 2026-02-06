@@ -26,14 +26,13 @@ iframe {
 #loginOverlay {
   position: fixed;
   inset: 0;
-  background: #000 url('./icon-1024x1024.png') center 40px no-repeat;
+  background: #000;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: center;
   color: #fff;
   z-index: 999;
-  padding-top: 200px;
 }
 #loginOverlay input {
   padding: 12px;
@@ -60,7 +59,6 @@ iframe {
 
 <body>
 
-<!-- LOGIN OVERLAY -->
 <div id="loginOverlay">
   <h2>Enter Password</h2>
   <input type="password" id="passwordInput" placeholder="Password" />
@@ -72,12 +70,16 @@ iframe {
 
 <script>
 /* ================= CONFIG ================= */
-const VERIFY_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-const HEARTBEAT_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat";
-const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const VERIFY_URL =
+  "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
 
-/* ================= STATE ================= */
-let externalId = null;   // 🔑 Password
+const HEARTBEAT_URL =
+  "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat";
+
+const APP_URL =
+  "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+
+let externalId = null;
 let playerId = null;
 let heartbeatInterval = null;
 
@@ -94,8 +96,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 async function submitPassword() {
   const error = document.getElementById("loginError");
   const password = document.getElementById("passwordInput").value.trim();
-  if (!password) return;
 
+  if (!password) return;
   error.textContent = "";
 
   const res = await fetch(VERIFY_URL, {
@@ -124,11 +126,15 @@ function unlockApp() {
   document.getElementById("appFrame").src = APP_URL;
 }
 
-function forceLogout() {
+async function forceLogout() {
+  // Stop heartbeat polling
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
+
+  // Unsubscribe from OneSignal to stop notifications
+  if (OneSignal) await OneSignal.logout();
 
   localStorage.removeItem("external_id");
   externalId = null;
@@ -143,18 +149,22 @@ async function initOneSignal(externalId) {
   return new Promise((resolve) => {
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     OneSignalDeferred.push(async function (OneSignal) {
+
       await OneSignal.init({
         appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
         notifyButton: { enable: true }
       });
 
       await OneSignal.login(externalId);
+
       playerId = await OneSignal.User.getId();
       if (!playerId) return;
 
-      // Start heartbeat immediately and loop every 10s
+      // Immediate heartbeat
       await heartbeat();
-      heartbeatInterval = setInterval(heartbeat, 10000);
+
+      // Poll heartbeat every 15s
+      heartbeatInterval = setInterval(heartbeat, 15000);
 
       resolve();
     });
@@ -172,13 +182,14 @@ async function heartbeat() {
 
     const data = await res.json();
 
-    // 🚨 Kick if this is not the latest device
+    // If server says this device is not allowed, logout immediately
     if (!data.allowed) {
       console.warn("⛔ Logged out: newer device detected");
       forceLogout();
     }
+
   } catch (e) {
-    console.warn("Heartbeat failed:", e);
+    console.warn("Heartbeat failed", e);
   }
 }
 </script>
