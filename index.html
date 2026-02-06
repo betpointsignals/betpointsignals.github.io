@@ -69,7 +69,7 @@ iframe {
 
 <body>
 
-<!-- LOGIN fallback -->
+<!-- LOGIN -->
 <div id="loginOverlay">
   <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
@@ -92,25 +92,32 @@ const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 let rowId = null;
 let linkId = null;
 
-/* GET row_id FROM URL OR LOCALSTORAGE */
+/* HELPER TO GET URL PARAM */
 function getRowIdFromUrl() {
   const params = new URLSearchParams(window.location.search);
   return params.get("row_id");
 }
 
-/* AUTO LOGIN */
+/* AUTO LOGIN / PREFILL */
 window.addEventListener("DOMContentLoaded", async () => {
-  rowId = localStorage.getItem("rowId") || getRowIdFromUrl();
-  linkId = localStorage.getItem("linkId");
+  const urlRowId = getRowIdFromUrl();
+  const savedRow = localStorage.getItem("rowId");
+  const savedLink = localStorage.getItem("linkId");
 
-  if (rowId) {
-    localStorage.setItem("rowId", rowId);
+  // Only auto-login if BOTH rowId and linkId exist in localStorage
+  if (savedRow && savedLink) {
+    rowId = savedRow;
+    linkId = savedLink;
     unlockApp();
     await initOneSignal();
+  } else if (urlRowId) {
+    // Prefill input field but still show login overlay
+    document.getElementById("rowIdInput").value = urlRowId;
+    rowId = urlRowId;
   }
 });
 
-/* LOGIN fallback */
+/* LOGIN */
 async function submitRowId() {
   const error = document.getElementById("loginError");
   rowId = document.getElementById("rowIdInput").value.trim();
@@ -124,6 +131,7 @@ async function submitRowId() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ row_id: rowId })
     });
+
     const data = await res.json();
     if (!data.valid) {
       error.textContent = "Invalid password";
@@ -149,10 +157,10 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
-/* ONESIGNAL INIT */
+/* ONESIGNAL */
 async function initOneSignal() {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function(OneSignal) {
+  OneSignalDeferred.push(async function (OneSignal) {
 
     await OneSignal.init({
       appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
@@ -162,29 +170,35 @@ async function initOneSignal() {
       notifyButton: { enable: true }
     });
 
-    if (!rowId) return;
+    const rowIdLocal  = localStorage.getItem("rowId");
+    const linkIdLocal = localStorage.getItem("linkId");
+    if (!rowIdLocal) return;
 
-    // 🔔 Listen for subscription changes
-    OneSignal.on('subscriptionChange', async (isSubscribed) => {
-      if (!isSubscribed) return;
+    OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
+      if (!event.current?.optedIn) return;
 
       try {
         // Attach external_id
-        await OneSignal.setExternalUserId(rowId);
+        await OneSignal.login(rowIdLocal);
 
-        // Get OneSignal player ID
-        const oneSignalId = await OneSignal.getUserId();
+        // OneSignal player ID
+        const oneSignalId = OneSignal.User.onesignalId;
+        if (!oneSignalId) {
+          console.error("OneSignal ID missing");
+          return;
+        }
+
         console.log("✅ OneSignal ID:", oneSignalId);
 
-        // Send to Supabase
+        // Save to Supabase
         const res = await fetch(REGISTER_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            rowId,
-            linkId,
-            playerId: oneSignalId,
-            deviceType
+            rowId: rowIdLocal,
+            linkId: linkIdLocal,
+            one_signal_id: oneSignalId,
+            device_type: deviceType
           })
         });
 
@@ -195,10 +209,6 @@ async function initOneSignal() {
         console.error("❌ OneSignal sync error:", err);
       }
     });
-
-    // Force check current subscription
-    const isSubscribed = await OneSignal.isPushNotificationsEnabled();
-    if (isSubscribed) OneSignal.on('subscriptionChange', true);
   });
 }
 </script>
