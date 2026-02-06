@@ -53,7 +53,7 @@ html, body {
   max-width:280px;
 }
 
-/* LOGIN */
+/* LOGIN (fallback only) */
 #loginOverlay {
   position:fixed;
   inset:0;
@@ -64,36 +64,6 @@ html, body {
   align-items:center;
   z-index:999;
   color:#fff;
-}
-
-#loginOverlay img {
-  width:96px;
-  height:96px;
-  margin-bottom:16px;
-}
-
-#loginOverlay input {
-  padding:12px;
-  font-size:16px;
-  width:220px;
-  border-radius:6px;
-  border:none;
-  margin-bottom:12px;
-}
-
-#loginOverlay button {
-  padding:12px 18px;
-  font-size:16px;
-  border-radius:6px;
-  border:none;
-  background:#007bff;
-  color:#fff;
-  cursor:pointer;
-}
-
-#loginError {
-  color:#ff4d4d;
-  margin-top:12px;
 }
 
 iframe {
@@ -116,7 +86,7 @@ iframe {
   </p>
 </div>
 
-<!-- LOGIN -->
+<!-- LOGIN (only if NO row_id anywhere) -->
 <div id="loginOverlay">
   <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
@@ -153,28 +123,30 @@ function getRowIdFromURL() {
   return params.get("row_id");
 }
 
-/* =============== BOOTSTRAP =============== */
+/* =============== BOOTSTRAP (STRICT) =============== */
 window.addEventListener("DOMContentLoaded", async () => {
 
   const urlRowId = getRowIdFromURL();
 
-  // If row_id exists AND app is NOT installed → show install screen
-  if (urlRowId && !isRunningAsPWA()) {
-    document.getElementById("installOverlay").style.display = "flex";
-    return;
-  }
+  /* 🔒 HARD GATE: row_id present */
+  if (urlRowId) {
 
-  // If installed AND row_id exists → auto-verify
-  if (urlRowId && isRunningAsPWA()) {
+    // NOT INSTALLED → ONLY show install screen
+    if (!isRunningAsPWA()) {
+      document.getElementById("installOverlay").style.display = "flex";
+      return; // ⛔ STOP EVERYTHING
+    }
+
+    // INSTALLED → auto verify
     await autoVerifyRowId(urlRowId);
     return;
   }
 
-  // Fallback: normal stored login
+  /* 🚫 NO row_id → normal fallback flow */
   const savedRow  = localStorage.getItem("rowId");
   const savedLink = localStorage.getItem("linkId");
 
-  if (savedRow && savedLink) {
+  if (savedRow && savedLink && isRunningAsPWA()) {
     rowId  = savedRow;
     linkId = savedLink;
     unlockApp();
@@ -194,10 +166,7 @@ async function autoVerifyRowId(rowIdFromURL) {
     });
 
     const data = await res.json();
-    if (!data.valid) {
-      document.getElementById("loginOverlay").style.display = "flex";
-      return;
-    }
+    if (!data.valid) return;
 
     rowId  = rowIdFromURL;
     linkId = data.link_id;
@@ -213,7 +182,7 @@ async function autoVerifyRowId(rowIdFromURL) {
   }
 }
 
-/* ================= LOGIN ================= */
+/* =============== LOGIN (manual) =============== */
 async function submitRowId() {
   const error = document.getElementById("loginError");
   rowId = document.getElementById("rowIdInput").value.trim();
@@ -266,33 +235,24 @@ function initOneSignal() {
       notifyButton: { enable: true }
     });
 
-    const rowIdLocal  = localStorage.getItem("rowId");
-    const linkIdLocal = localStorage.getItem("linkId");
-    if (!rowIdLocal) return;
-
     OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
       if (!event.current?.optedIn) return;
 
-      try {
-        await OneSignal.login(rowIdLocal);
+      await OneSignal.login(rowId);
 
-        const oneSignalId = OneSignal.User.onesignalId;
-        if (!oneSignalId) return;
+      const oneSignalId = OneSignal.User.onesignalId;
+      if (!oneSignalId) return;
 
-        await fetch(REGISTER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rowId: rowIdLocal,
-            linkId: linkIdLocal,
-            one_signal_id: oneSignalId,
-            device_type: deviceType
-          })
-        });
-
-      } catch (err) {
-        console.error("OneSignal error:", err);
-      }
+      await fetch(REGISTER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rowId,
+          linkId,
+          one_signal_id: oneSignalId,
+          device_type: deviceType
+        })
+      });
     });
   });
 }
