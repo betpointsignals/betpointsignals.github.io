@@ -84,7 +84,6 @@ iframe {
 <script>
 /* CONFIG */
 const VERIFY_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-const CHECK_PLAYER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-current-player";
 const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
 const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
@@ -191,24 +190,6 @@ async function initOneSignal() {
       OneSignal.User.PushSubscription.addEventListener("change", async () => {
         await storeAndCheckPlayer();
       });
-
-      // 🔁 Poll Supabase for latest player_id in betpoint_multi
-      setInterval(async () => {
-        if (!rowIdLocal) return;
-        try {
-          const res = await fetch(`${CHECK_PLAYER_URL}?row_id=${rowIdLocal}`);
-          const data = await res.json();
-          const latestPlayerId = data?.player_id;
-          const currentPlayerId = localStorage.getItem("playerId");
-
-          if (latestPlayerId && currentPlayerId && latestPlayerId !== currentPlayerId) {
-            console.log("⚠ Player ID mismatch with DB. Showing login.");
-            showLogin();
-          }
-        } catch (err) {
-          console.error("Error checking latest player:", err);
-        }
-      }, 10000); // every 10s
 
       resolve();
     });
