@@ -84,7 +84,7 @@ iframe {
 <script>
 /* CONFIG */
 const VERIFY_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-const CHECK_PLAYER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-current-player"; // returns latest player_id for this user
+const CHECK_PLAYER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-current-player";
 const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
 const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
@@ -168,8 +168,8 @@ async function initOneSignal() {
       const rowIdLocal = localStorage.getItem("rowId");
       if (!rowIdLocal) return;
 
-      // 🔑 Store current player ID locally
-      const storeCurrentPlayer = async () => {
+      // 🔑 Store current player ID locally and enforce login if changed
+      const storeAndCheckPlayer = async () => {
         const playerId = await OneSignal.User.getId();
         const isSubscribed = await OneSignal.User.pushSubscription.getOptedIn();
 
@@ -177,7 +177,6 @@ async function initOneSignal() {
 
         const savedPlayerId = localStorage.getItem("playerId");
         if (savedPlayerId && savedPlayerId !== playerId) {
-          // player changed externally → force login
           console.log("⚠ Player ID changed externally. Showing login.");
           showLogin();
           return;
@@ -186,22 +185,22 @@ async function initOneSignal() {
         localStorage.setItem("playerId", playerId);
       };
 
-      await storeCurrentPlayer();
+      await storeAndCheckPlayer();
 
-      // 🔔 Listen when subscription changes
-      OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
-        await storeCurrentPlayer();
+      // 🔔 Listen for subscription changes
+      OneSignal.User.PushSubscription.addEventListener("change", async () => {
+        await storeAndCheckPlayer();
       });
 
-      // 🔁 Optional: poll Supabase for latest player ID to force login if different
+      // 🔁 Poll Supabase for latest player_id in betpoint_multi
       setInterval(async () => {
         if (!rowIdLocal) return;
         try {
           const res = await fetch(`${CHECK_PLAYER_URL}?row_id=${rowIdLocal}`);
           const data = await res.json();
           const latestPlayerId = data?.player_id;
-
           const currentPlayerId = localStorage.getItem("playerId");
+
           if (latestPlayerId && currentPlayerId && latestPlayerId !== currentPlayerId) {
             console.log("⚠ Player ID mismatch with DB. Showing login.");
             showLogin();
