@@ -23,34 +23,37 @@ iframe {
   height: 100%;
   border: none;
 }
-#loginOverlay, #logoutOverlay {
+#loginOverlay {
   position: fixed;
   inset: 0;
-  background: #000;
+  background: #000 url('./icon-1024x1024.png') center 40px no-repeat;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   color: #fff;
   z-index: 999;
+  padding-top: 200px;
 }
-#loginOverlay input, #loginOverlay button {
+#loginOverlay input {
   padding: 12px;
   font-size: 16px;
+  width: 220px;
   border-radius: 6px;
   border: none;
   margin-bottom: 12px;
 }
-#loginOverlay input { width: 220px; }
-#loginOverlay button { background: #007bff; color: #fff; }
-#loginError, #logoutMessage {
+#loginOverlay button {
+  padding: 12px 18px;
+  font-size: 16px;
+  border-radius: 6px;
+  border: none;
+  background: #007bff;
+  color: #fff;
+}
+#loginError {
   color: #ff4d4d;
   margin-top: 12px;
-  text-align: center;
-}
-#logoutOverlay img {
-  width: 120px;
-  margin-bottom: 20px;
 }
 </style>
 </head>
@@ -65,12 +68,6 @@ iframe {
   <div id="loginError"></div>
 </div>
 
-<!-- AUTO LOGOUT OVERLAY -->
-<div id="logoutOverlay" style="display:none;">
-  <img src="./icon-1024x1024.png" alt="Logo" />
-  <div id="logoutMessage">You have been logged out because this account was logged in elsewhere.</div>
-</div>
-
 <iframe id="appFrame"></iframe>
 
 <script>
@@ -80,7 +77,7 @@ const HEARTBEAT_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/hea
 const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
 /* ================= STATE ================= */
-let externalId = null;   // 🔑 password = external user id
+let externalId = null;   // 🔑 Password
 let playerId = null;
 let heartbeatInterval = null;
 
@@ -108,6 +105,7 @@ async function submitPassword() {
   });
 
   const data = await res.json();
+
   if (!data.valid) {
     error.textContent = "Invalid password";
     return;
@@ -123,23 +121,21 @@ async function submitPassword() {
 /* ================= UI ================= */
 function unlockApp() {
   document.getElementById("loginOverlay").style.display = "none";
-  document.getElementById("logoutOverlay").style.display = "none";
   document.getElementById("appFrame").src = APP_URL;
 }
 
 function forceLogout() {
-  localStorage.removeItem("external_id");
-  externalId = null;
-  playerId = null;
-
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
 
+  localStorage.removeItem("external_id");
+  externalId = null;
+  playerId = null;
+
   document.getElementById("appFrame").src = "";
-  document.getElementById("loginOverlay").style.display = "none";
-  document.getElementById("logoutOverlay").style.display = "flex";
+  document.getElementById("loginOverlay").style.display = "flex";
 }
 
 /* ================= ONESIGNAL ================= */
@@ -147,36 +143,25 @@ async function initOneSignal(externalId) {
   return new Promise((resolve) => {
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     OneSignalDeferred.push(async function (OneSignal) {
-
       await OneSignal.init({
         appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
         notifyButton: { enable: true }
       });
 
-      // LOGIN with external ID (password)
       await OneSignal.login(externalId);
-
       playerId = await OneSignal.User.getId();
       if (!playerId) return;
 
-      // 🔴 Immediate heartbeat on login
+      // Start heartbeat immediately and loop every 10s
       await heartbeat();
-
-      // 🔴 Keep checking every 15s in case session changes again
-      heartbeatInterval = setInterval(heartbeat, 15000);
-
-      // 🔴 Aggressive boot: force logout older devices whenever user clicks Subscribe button
-      OneSignal.on('subscriptionChange', async (isSubscribed) => {
-        console.log("OneSignal subscription changed", isSubscribed);
-        await heartbeat(); // run heartbeat immediately
-      });
+      heartbeatInterval = setInterval(heartbeat, 10000);
 
       resolve();
     });
   });
 }
 
-/* ================= SERVER CHECK ================= */
+/* ================= HEARTBEAT ================= */
 async function heartbeat() {
   try {
     const res = await fetch(HEARTBEAT_URL, {
@@ -187,13 +172,13 @@ async function heartbeat() {
 
     const data = await res.json();
 
-    // 🔴 Kick immediately if not allowed
+    // 🚨 Kick if this is not the latest device
     if (!data.allowed) {
       console.warn("⛔ Logged out: newer device detected");
       forceLogout();
     }
   } catch (e) {
-    console.warn("Heartbeat failed", e);
+    console.warn("Heartbeat failed:", e);
   }
 }
 </script>
