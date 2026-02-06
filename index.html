@@ -1,126 +1,152 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Signal Alerts — Bet Point</title>
 
-<link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#007bff">
-<link rel="apple-touch-icon" href="./icon-1024x1024.png">
+<link rel="manifest" href="./manifest.json" />
+<meta name="theme-color" content="#007bff" />
+<link rel="apple-touch-icon" href="./icon-1024x1024.png" />
 
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
 <style>
 html, body {
-  margin:0;
-  height:100%;
-  background:#000;
-  font-family:Arial,sans-serif;
+  margin: 0;
+  height: 100%;
+  background: #000;
+  font-family: Arial, sans-serif;
 }
 iframe {
-  width:100%;
-  height:100%;
-  border:none;
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 #loginOverlay {
-  position:fixed;
-  inset:0;
-  background:#000;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  align-items:center;
-  color:#fff;
-  z-index:999;
+  position: fixed;
+  inset: 0;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  z-index: 999;
 }
 #loginOverlay input {
-  padding:12px;
-  font-size:16px;
-  width:220px;
-  border-radius:6px;
-  border:none;
-  margin-bottom:12px;
+  padding: 12px;
+  font-size: 16px;
+  width: 220px;
+  border-radius: 6px;
+  border: none;
+  margin-bottom: 12px;
 }
 #loginOverlay button {
-  padding:12px 18px;
-  font-size:16px;
-  border-radius:6px;
-  border:none;
-  background:#007bff;
-  color:#fff;
+  padding: 12px 18px;
+  font-size: 16px;
+  border-radius: 6px;
+  border: none;
+  background: #007bff;
+  color: #fff;
 }
-#loginError { color:#ff4d4d; margin-top:12px; }
+#loginError {
+  color: #ff4d4d;
+  margin-top: 12px;
+}
 </style>
 </head>
 
 <body>
 
+<!-- LOGIN OVERLAY -->
 <div id="loginOverlay">
   <h2>Enter Password</h2>
-  <input type="password" id="rowIdInput" placeholder="Password">
-  <button onclick="submitRowId()">Submit</button>
+  <input type="password" id="passwordInput" placeholder="Password" />
+  <button onclick="submitPassword()">Submit</button>
   <div id="loginError"></div>
 </div>
 
 <iframe id="appFrame"></iframe>
 
 <script>
-const VERIFY_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-const HEARTBEAT_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat";
-const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+/* ================= CONFIG ================= */
+const VERIFY_URL =
+  "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
 
-let rowId = null;
+const HEARTBEAT_URL =
+  "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat";
+
+const APP_URL =
+  "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+
+/* ================= STATE ================= */
+let externalId = null;   // 🔑 THIS IS THE PASSWORD
 let playerId = null;
+let heartbeatInterval = null;
 
-/* ---------- AUTO LOGIN ---------- */
+/* ================= AUTO LOGIN ================= */
 window.addEventListener("DOMContentLoaded", async () => {
-  rowId = localStorage.getItem("rowId");
-  if (rowId) {
+  externalId = localStorage.getItem("external_id");
+  if (externalId) {
     unlockApp();
-    await initOneSignal();
+    await initOneSignal(externalId);
   }
 });
 
-/* ---------- LOGIN ---------- */
-async function submitRowId() {
+/* ================= LOGIN ================= */
+async function submitPassword() {
   const error = document.getElementById("loginError");
-  rowId = document.getElementById("rowIdInput").value.trim();
-  if (!rowId) return;
+  const password = document.getElementById("passwordInput").value.trim();
+
+  if (!password) return;
 
   error.textContent = "";
 
   const res = await fetch(VERIFY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ row_id: rowId })
+    body: JSON.stringify({ row_id: password })
   });
 
   const data = await res.json();
+
   if (!data.valid) {
     error.textContent = "Invalid password";
     return;
   }
 
-  localStorage.setItem("rowId", rowId);
+  // 🔑 PASSWORD IS STORED + USED AS EXTERNAL USER ID
+  externalId = password;
+  localStorage.setItem("external_id", externalId);
+
   unlockApp();
-  await initOneSignal();
+  await initOneSignal(externalId);
 }
 
-/* ---------- UI ---------- */
+/* ================= UI ================= */
 function unlockApp() {
   document.getElementById("loginOverlay").style.display = "none";
   document.getElementById("appFrame").src = APP_URL;
 }
 
 function forceLogout() {
-  localStorage.clear();
+  localStorage.removeItem("external_id");
+  externalId = null;
+  playerId = null;
+
+  // Clear heartbeat interval if exists
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+
   document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
 }
 
-/* ---------- ONESIGNAL ---------- */
-async function initOneSignal() {
+/* ================= ONESIGNAL ================= */
+async function initOneSignal(externalId) {
   return new Promise((resolve) => {
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     OneSignalDeferred.push(async function (OneSignal) {
@@ -130,42 +156,44 @@ async function initOneSignal() {
         notifyButton: { enable: true }
       });
 
-      // 🔑 Attach external user id
-      await OneSignal.login(rowId);
+      // 🔑 THIS IS THE CRITICAL LINE
+      // PASSWORD === EXTERNAL USER ID
+      await OneSignal.login(externalId);
 
       playerId = await OneSignal.User.getId();
       if (!playerId) return;
 
-      // Register device as latest
+      // Immediate registration
       await heartbeat();
 
-      // Check every 15s if still allowed
-      setInterval(heartbeat, 15000);
+      // Re-check every 15 seconds
+      heartbeatInterval = setInterval(heartbeat, 15000);
 
       resolve();
     });
   });
 }
 
-/* ---------- SERVER AUTH CHECK ---------- */
+/* ================= SERVER CHECK ================= */
 async function heartbeat() {
   try {
     const res = await fetch(HEARTBEAT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        row_id: rowId,
+        row_id: externalId,
         player_id: playerId
       })
     });
 
     const data = await res.json();
+
     if (!data.allowed) {
       console.warn("⛔ Logged out: newer device detected");
       forceLogout();
     }
-  } catch {
-    console.warn("Heartbeat failed");
+  } catch (e) {
+    console.warn("Heartbeat failed", e);
   }
 }
 </script>
