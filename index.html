@@ -22,7 +22,7 @@ html, body {
   background:#000;
 }
 
-/* INSTALL SCREEN */
+/* INSTALL PROMPT */
 #installOverlay {
   position:fixed;
   inset:0;
@@ -50,7 +50,7 @@ html, body {
 #installOverlay p {
   font-size:14px;
   opacity:0.85;
-  max-width:260px;
+  max-width:280px;
 }
 
 /* LOGIN */
@@ -58,7 +58,7 @@ html, body {
   position:fixed;
   inset:0;
   background:#000;
-  display:flex;
+  display:none;
   flex-direction:column;
   justify-content:center;
   align-items:center;
@@ -107,7 +107,7 @@ iframe {
 
 <body>
 
-<!-- INSTALL PROMPT -->
+<!-- ADD TO HOME SCREEN -->
 <div id="installOverlay">
   <img src="./icon-1024x1024.png" alt="Logo">
   <h2>ADD THIS APP TO YOUR HOME SCREEN</h2>
@@ -139,7 +139,7 @@ const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 let rowId = null;
 let linkId = null;
 
-/* =============== PWA DETECTION =============== */
+/* =============== HELPERS =============== */
 function isRunningAsPWA() {
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
@@ -148,17 +148,29 @@ function isRunningAsPWA() {
   );
 }
 
-/* =============== BOOTSTRAP =============== */
-window.addEventListener("DOMContentLoaded", () => {
+function getRowIdFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("row_id");
+}
 
-  // 🚫 Not installed → show install screen ONLY
-  if (!isRunningAsPWA()) {
+/* =============== BOOTSTRAP =============== */
+window.addEventListener("DOMContentLoaded", async () => {
+
+  const urlRowId = getRowIdFromURL();
+
+  // If row_id exists AND app is NOT installed → show install screen
+  if (urlRowId && !isRunningAsPWA()) {
     document.getElementById("installOverlay").style.display = "flex";
-    document.getElementById("loginOverlay").style.display = "none";
     return;
   }
 
-  // ✅ Installed → normal app flow
+  // If installed AND row_id exists → auto-verify
+  if (urlRowId && isRunningAsPWA()) {
+    await autoVerifyRowId(urlRowId);
+    return;
+  }
+
+  // Fallback: normal stored login
   const savedRow  = localStorage.getItem("rowId");
   const savedLink = localStorage.getItem("linkId");
 
@@ -167,8 +179,39 @@ window.addEventListener("DOMContentLoaded", () => {
     linkId = savedLink;
     unlockApp();
     initOneSignal();
+  } else {
+    document.getElementById("loginOverlay").style.display = "flex";
   }
 });
+
+/* =============== AUTO VERIFY =============== */
+async function autoVerifyRowId(rowIdFromURL) {
+  try {
+    const res = await fetch(VERIFY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ row_id: rowIdFromURL })
+    });
+
+    const data = await res.json();
+    if (!data.valid) {
+      document.getElementById("loginOverlay").style.display = "flex";
+      return;
+    }
+
+    rowId  = rowIdFromURL;
+    linkId = data.link_id;
+
+    localStorage.setItem("rowId", rowId);
+    localStorage.setItem("linkId", linkId);
+
+    unlockApp();
+    initOneSignal();
+
+  } catch (err) {
+    console.error("Auto verify failed", err);
+  }
+}
 
 /* ================= LOGIN ================= */
 async function submitRowId() {
@@ -227,12 +270,10 @@ function initOneSignal() {
     const linkIdLocal = localStorage.getItem("linkId");
     if (!rowIdLocal) return;
 
-    // 🔔 User actually subscribed
     OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
       if (!event.current?.optedIn) return;
 
       try {
-        // Attach external_id
         await OneSignal.login(rowIdLocal);
 
         const oneSignalId = OneSignal.User.onesignalId;
