@@ -69,7 +69,7 @@ iframe {
 
 <body>
 
-<!-- LOGIN -->
+<!-- LOGIN fallback -->
 <div id="loginOverlay">
   <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
@@ -92,20 +92,25 @@ const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 let rowId = null;
 let linkId = null;
 
-/* AUTO LOGIN */
-window.addEventListener("DOMContentLoaded", () => {
-  const savedRow = localStorage.getItem("rowId");
-  const savedLink = localStorage.getItem("linkId");
+/* GET row_id FROM URL OR LOCALSTORAGE */
+function getRowIdFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("row_id");
+}
 
-  if (savedRow && savedLink) {
-    rowId = savedRow;
-    linkId = savedLink;
+/* AUTO LOGIN */
+window.addEventListener("DOMContentLoaded", async () => {
+  rowId = localStorage.getItem("rowId") || getRowIdFromUrl();
+  linkId = localStorage.getItem("linkId");
+
+  if (rowId) {
+    localStorage.setItem("rowId", rowId);
     unlockApp();
-    initOneSignal();
+    await initOneSignal();
   }
 });
 
-/* LOGIN */
+/* LOGIN fallback */
 async function submitRowId() {
   const error = document.getElementById("loginError");
   rowId = document.getElementById("rowIdInput").value.trim();
@@ -119,7 +124,6 @@ async function submitRowId() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ row_id: rowId })
     });
-
     const data = await res.json();
     if (!data.valid) {
       error.textContent = "Invalid password";
@@ -131,7 +135,7 @@ async function submitRowId() {
     localStorage.setItem("linkId", linkId);
 
     unlockApp();
-    initOneSignal();
+    await initOneSignal();
 
   } catch {
     error.textContent = "Server error";
@@ -145,10 +149,10 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
-/* ONESIGNAL – THE ONLY CORRECT WAY */
-function initOneSignal() {
+/* ONESIGNAL INIT */
+async function initOneSignal() {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function (OneSignal) {
+  OneSignalDeferred.push(async function(OneSignal) {
 
     await OneSignal.init({
       appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
@@ -158,36 +162,29 @@ function initOneSignal() {
       notifyButton: { enable: true }
     });
 
-    const rowIdLocal  = localStorage.getItem("rowId");
-    const linkIdLocal = localStorage.getItem("linkId");
-    if (!rowIdLocal) return;
+    if (!rowId) return;
 
-    // 🔔 THIS is when the player ACTUALLY exists
-    OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
-      if (!event.current?.optedIn) return;
+    // 🔔 Listen for subscription changes
+    OneSignal.on('subscriptionChange', async (isSubscribed) => {
+      if (!isSubscribed) return;
 
       try {
-        // 1️⃣ Attach external_id
-        await OneSignal.login(rowIdLocal);
+        // Attach external_id
+        await OneSignal.setExternalUserId(rowId);
 
-        // 2️⃣ Guaranteed OneSignal player ID
-        const oneSignalId = OneSignal.User.onesignalId;
-        if (!oneSignalId) {
-          console.error("OneSignal ID missing");
-          return;
-        }
-
+        // Get OneSignal player ID
+        const oneSignalId = await OneSignal.getUserId();
         console.log("✅ OneSignal ID:", oneSignalId);
 
-        // 3️⃣ Save to Supabase
+        // Send to Supabase
         const res = await fetch(REGISTER_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            rowId: rowIdLocal,
-            linkId: linkIdLocal,
-            one_signal_id: oneSignalId,
-            device_type: deviceType
+            rowId,
+            linkId,
+            playerId: oneSignalId,
+            deviceType
           })
         });
 
@@ -198,6 +195,10 @@ function initOneSignal() {
         console.error("❌ OneSignal sync error:", err);
       }
     });
+
+    // Force check current subscription
+    const isSubscribed = await OneSignal.isPushNotificationsEnabled();
+    if (isSubscribed) OneSignal.on('subscriptionChange', true);
   });
 }
 </script>
