@@ -165,6 +165,12 @@ async function initOneSignal(externalId) {
       // 🔴 Keep checking every 15s in case session changes again
       heartbeatInterval = setInterval(heartbeat, 15000);
 
+      // 🔴 Aggressive boot: force logout older devices whenever user clicks Subscribe button
+      OneSignal.on('subscriptionChange', async (isSubscribed) => {
+        console.log("OneSignal subscription changed", isSubscribed);
+        await heartbeat(); // run heartbeat immediately
+      });
+
       resolve();
     });
   });
