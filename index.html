@@ -83,10 +83,9 @@ iframe {
 
 <script>
 /* CONFIG */
-const VERIFY_URL         = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-const CLEAR_PREVIOUS_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/clear-previous";
-const REGISTER_URL       = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device";
-const APP_URL            = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const VERIFY_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
+const CHECK_PLAYER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-current-player"; // returns latest player_id for this user
+const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
 const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 
@@ -94,7 +93,7 @@ let rowId = null;
 let linkId = null;
 
 /* AUTO LOGIN */
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   const savedRow = localStorage.getItem("rowId");
   const savedLink = localStorage.getItem("linkId");
 
@@ -102,7 +101,7 @@ window.addEventListener("DOMContentLoaded", () => {
     rowId = savedRow;
     linkId = savedLink;
     unlockApp();
-    initOneSignal();
+    await initOneSignal();
   }
 });
 
@@ -132,7 +131,7 @@ async function submitRowId() {
     localStorage.setItem("linkId", linkId);
 
     unlockApp();
-    initOneSignal();
+    await initOneSignal();
 
   } catch {
     error.textContent = "Server error";
@@ -146,64 +145,74 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
+/* SHOW LOGIN */
+function showLogin() {
+  document.getElementById("loginOverlay").style.display = "flex";
+  document.getElementById("appFrame").src = "";
+}
+
 /* ONESIGNAL INIT */
-function initOneSignal() {
-  window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function (OneSignal) {
+async function initOneSignal() {
+  return new Promise((resolve) => {
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function (OneSignal) {
 
-    await OneSignal.init({
-      appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
-      path: "/signals/",
-      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton: { enable: true }
-    });
-
-    const rowIdLocal  = localStorage.getItem("rowId");
-    const linkIdLocal = localStorage.getItem("linkId");
-    if (!rowIdLocal) return;
-
-    // 🔑 Always store the current player ID in Supabase
-    const storeCurrentPlayerId = async () => {
-      const playerId = await OneSignal.User.getId();
-      const isSubscribed = await OneSignal.User.pushSubscription.getOptedIn();
-
-      if (!isSubscribed || !playerId) return;
-
-      // Clear previous sessions on other devices
-      await fetch(CLEAR_PREVIOUS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rowId: rowIdLocal,
-          currentPlayerId: playerId
-        })
+      await OneSignal.init({
+        appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
+        path: "/signals/",
+        serviceWorkerPath: "signals/OneSignalSDKWorker.js",
+        serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
+        notifyButton: { enable: true }
       });
 
-      // Register or update this device in Supabase
-      const res = await fetch(REGISTER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rowId: rowIdLocal,
-          one_signal_id: playerId,
-          device_type: deviceType
-        })
+      const rowIdLocal = localStorage.getItem("rowId");
+      if (!rowIdLocal) return;
+
+      // 🔑 Store current player ID locally
+      const storeCurrentPlayer = async () => {
+        const playerId = await OneSignal.User.getId();
+        const isSubscribed = await OneSignal.User.pushSubscription.getOptedIn();
+
+        if (!isSubscribed || !playerId) return;
+
+        const savedPlayerId = localStorage.getItem("playerId");
+        if (savedPlayerId && savedPlayerId !== playerId) {
+          // player changed externally → force login
+          console.log("⚠ Player ID changed externally. Showing login.");
+          showLogin();
+          return;
+        }
+
+        localStorage.setItem("playerId", playerId);
+      };
+
+      await storeCurrentPlayer();
+
+      // 🔔 Listen when subscription changes
+      OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
+        await storeCurrentPlayer();
       });
 
-      const json = await res.json();
-      console.log("✅ Supabase response:", json);
-    };
+      // 🔁 Optional: poll Supabase for latest player ID to force login if different
+      setInterval(async () => {
+        if (!rowIdLocal) return;
+        try {
+          const res = await fetch(`${CHECK_PLAYER_URL}?row_id=${rowIdLocal}`);
+          const data = await res.json();
+          const latestPlayerId = data?.player_id;
 
-    // Run immediately on init
-    await storeCurrentPlayerId();
+          const currentPlayerId = localStorage.getItem("playerId");
+          if (latestPlayerId && currentPlayerId && latestPlayerId !== currentPlayerId) {
+            console.log("⚠ Player ID mismatch with DB. Showing login.");
+            showLogin();
+          }
+        } catch (err) {
+          console.error("Error checking latest player:", err);
+        }
+      }, 10000); // every 10s
 
-    // 🔔 Listen when subscription changes (user clicks bell)
-    OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
-      if (!event.current?.optedIn) return;
-      await storeCurrentPlayerId();
+      resolve();
     });
-
   });
 }
 </script>
