@@ -92,6 +92,7 @@ function setAuthState(isAuthed, reason = null) {
   const frame = document.getElementById('appFrame');
 
   if (isAuthed) {
+    console.log("✅ Auth successful");
     overlay.style.display = 'none';
     frame.src = APP_URL;
     startHeartbeat();
@@ -117,6 +118,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedCode = localStorage.getItem('loginCode');
 
   if (savedRow && savedCode) {
+    console.log("🔄 Found saved credentials", { savedRow, savedCode });
     rowId = savedRow;
     loginCode = savedCode;
 
@@ -139,6 +141,8 @@ async function submitRowId() {
   loginCode = crypto.randomUUID();
 
   try {
+    console.log("🔑 Attempting login with", { rowId, loginCode });
+
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -146,8 +150,11 @@ async function submitRowId() {
     });
 
     const data = await res.json();
+    console.log("Login response:", data);
+
     if (!data.valid) {
       error.textContent = 'Login failed';
+      console.warn("❌ Login failed", data);
       return;
     }
 
@@ -163,7 +170,7 @@ async function submitRowId() {
     startPolling();
 
   } catch (err) {
-    console.error("Login error:", err);
+    console.error("Login exception:", err);
     error.textContent = 'Server error';
   } finally {
     spinner.style.display = 'none';
@@ -185,6 +192,7 @@ function initOneSignal(rowId) {
     try {
       await OneSignal.login(rowId);
       const playerId = await OneSignal.getUserId();
+      console.log("🎯 OneSignal playerId:", playerId);
 
       await fetch(REGISTER_URL, {
         method:"POST",
@@ -198,7 +206,7 @@ function initOneSignal(rowId) {
       });
 
       startHeartbeat();
-      console.log("OneSignal initialized:", rowId, playerId);
+      console.log("✅ OneSignal initialized", { rowId, playerId });
 
     } catch(err) {
       console.error("OneSignal error:", err);
@@ -233,6 +241,8 @@ function startPolling() {
       }
 
       const data = await res.json();
+      console.log("Polling response:", data);
+
       if (!data.valid) {
         console.warn("Auth invalid, logging out:", data.error || "Unknown reason");
         setAuthState(false, data.error || "Logged in on another device");
