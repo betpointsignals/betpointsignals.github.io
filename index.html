@@ -42,17 +42,49 @@ iframe { width:100%; height:100%; border:none; display:block; }
 <script>
 /* ================= CONFIG ================= */
 const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
-const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS      = 15000;
+const HEARTBEAT_MS = 10000;
 const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let loginCode = null;
 let pollTimer = null;
+let heartbeatTimer = null;
 let gracePeriod = false;
+
+/* ================= HEARTBEAT ================= */
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    if (!rowId || !loginCode) return;
+
+    window.OneSignalDeferred?.push(async function(OneSignal) {
+      try {
+        await OneSignal.login(rowId);
+        console.log("🫀 OneSignal heartbeat refreshed");
+      } catch (e) {
+        console.warn("Heartbeat failed", e);
+      }
+    });
+  }, HEARTBEAT_MS);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") startHeartbeat();
+  else stopHeartbeat();
+});
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -60,26 +92,36 @@ function setAuthState(isAuthed, reason = null) {
   const frame = document.getElementById('appFrame');
 
   if (isAuthed) {
+    console.log("✅ Auth successful");
     overlay.style.display = 'none';
     frame.src = APP_URL;
+    startHeartbeat();
   } else {
+    console.warn("⛔ Auth revoked:", reason);
+
     localStorage.removeItem('rowId');
     localStorage.removeItem('loginCode');
+
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
+
+    stopHeartbeat();
+
     frame.src = 'about:blank';
     overlay.style.display = 'flex';
-    console.warn("Auth revoked:", reason);
   }
 }
 
 /* ================= AUTO LOGIN ================= */
-window.addEventListener('DOMContentLoaded', async () => {
+window.addEventListener('DOMContentLoaded', () => {
   const savedRow = localStorage.getItem('rowId');
   const savedCode = localStorage.getItem('loginCode');
+
   if (savedRow && savedCode) {
+    console.log("🔄 Found saved credentials", { savedRow, savedCode });
     rowId = savedRow;
     loginCode = savedCode;
+
     setAuthState(true);
     initOneSignal(rowId);
     startPolling();
@@ -95,17 +137,20 @@ async function submitRowId() {
 
   error.textContent = '';
   spinner.style.display = 'block';
+
   loginCode = crypto.randomUUID();
 
   try {
-    // ✅ Verify login code
+    console.log("🔑 Attempting login with", { rowId, loginCode });
+
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ row_id: rowId, code: loginCode })
     });
+
     const data = await res.json();
-    console.log("Verify response:", data);
+    console.log("Login response:", data);
 
     if (!data.valid) {
       error.textContent = 'Login failed';
@@ -113,7 +158,6 @@ async function submitRowId() {
       return;
     }
 
-    // ✅ Save locally
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
 
@@ -125,7 +169,7 @@ async function submitRowId() {
 
     startPolling();
 
-  } catch(err) {
+  } catch (err) {
     console.error("Login exception:", err);
     error.textContent = 'Server error';
   } finally {
@@ -148,7 +192,7 @@ function initOneSignal(rowId) {
     try {
       await OneSignal.login(rowId);
       const playerId = await OneSignal.getUserId();
-      console.log("OneSignal playerId:", playerId);
+      console.log("🎯 OneSignal playerId:", playerId);
 
       await fetch(REGISTER_URL, {
         method:"POST",
@@ -161,7 +205,8 @@ function initOneSignal(rowId) {
         })
       });
 
-      console.log("✅ OneSignal initialized");
+      startHeartbeat();
+      console.log("✅ OneSignal initialized", { rowId, playerId });
 
     } catch(err) {
       console.error("OneSignal error:", err);
@@ -175,19 +220,32 @@ function startPolling() {
 
   const pollFn = async () => {
     if (gracePeriod) return;
-    if (!rowId || !loginCode) return;
+    if (!rowId || !loginCode) {
+      console.warn("Polling skipped: rowId or loginCode missing", { rowId, loginCode });
+      return;
+    }
 
     try {
+      console.log("Polling checklast4 with:", { rowId, loginCode });
+
       const res = await fetch(CHECK_LAST4, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ row_id: rowId, code: loginCode })
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Polling fetch error:", res.status, text);
+        return;
+      }
+
       const data = await res.json();
       console.log("Polling response:", data);
 
       if (!data.valid) {
-        setAuthState(false, data.error || "Code mismatch");
+        console.warn("Auth invalid, logging out:", data.error || "Unknown reason");
+        setAuthState(false, data.error || "Logged in on another device");
       }
 
     } catch(err) {
@@ -195,9 +253,8 @@ function startPolling() {
     }
   };
 
-  pollFn(); // first poll immediately
-  pollTimer = setInterval(pollFn, POLL_MS);
-}
-</script>
-</body>
-</html>
+  // 🔹 First poll immediately
+  pollFn();
+
+  // 🔹 Then start interval
+  pollTimer = setInterval(pollFn, POLL_MS); give whole update
