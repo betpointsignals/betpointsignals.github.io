@@ -122,9 +122,20 @@ async function submitRowId() {
 
 /* ================= UI ================= */
 function unlockApp() {
-  document.getElementById('loginOverlay').style.display = 'none';
   const frame = document.getElementById('appFrame');
-  if (!frame.src) frame.src = APP_URL;
+  const spinner = document.getElementById('spinner');
+
+  // Show spinner
+  spinner.style.display = 'block';
+
+  // Set src and reload iframe always
+  frame.src = APP_URL;
+
+  // Wait until iframe loads
+  frame.onload = () => {
+    spinner.style.display = 'none';
+    document.getElementById('loginOverlay').style.display = 'none';
+  };
 }
 
 function forceLogout(reason) {
@@ -133,7 +144,11 @@ function forceLogout(reason) {
   localStorage.removeItem('linkId');
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
-  document.getElementById('appFrame').src = '';
+
+  const frame = document.getElementById('appFrame');
+  frame.src = 'about:blank'; // reset iframe safely
+  frame.onload = null;
+
   document.getElementById('loginOverlay').style.display = 'flex';
 }
 
@@ -149,12 +164,10 @@ function initOneSignal(rowId) {
       notifyButton:{ enable:true }
     });
 
-    // Automatically set external ID
     try {
       await OneSignal.login(rowId); // 🔑 Sets external_id = rowId
       const playerId = await OneSignal.getUserId();
 
-      // Save playerId to backend
       await fetch(REGISTER_URL, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
@@ -176,7 +189,7 @@ function initOneSignal(rowId) {
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
-    if (gracePeriod) return; // skip checking during grace period
+    if (gracePeriod) return;
 
     const rowIdLocal = localStorage.getItem('rowId');
     if (!rowIdLocal) return;
