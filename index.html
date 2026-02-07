@@ -14,21 +14,30 @@
 <style>
 html, body { margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000; }
 iframe { width:100%; height:100%; border:none; display:block; }
-#loginOverlay { position:fixed; inset:0; background:#000; display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:999; color:#fff; }
+
+#loginOverlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.7);
+  display:flex; flex-direction:column; justify-content:center; align-items:center;
+  z-index:999; color:#fff;
+}
+
 #loginOverlay img { width:96px; height:96px; margin-bottom:16px; }
 #loginOverlay input { padding:12px; font-size:16px; width:220px; border-radius:6px; border:none; margin-bottom:12px; }
 #loginOverlay button { padding:12px 18px; font-size:16px; border-radius:6px; border:none; background:#007bff; color:#fff; cursor:pointer; }
 #loginError { color:#ff4d4d; margin-top:12px; }
+
+/* Spinner */
 #spinner {
-  border: 4px solid rgba(255, 255, 255, 0.2);
+  display:none;
+  border: 4px solid #f3f3f3;
   border-top: 4px solid #007bff;
   border-radius: 50%;
   width: 36px;
   height: 36px;
   animation: spin 1s linear infinite;
-  margin-top:12px;
-  display:none;
+  margin-top: 12px;
 }
+
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
@@ -63,7 +72,6 @@ const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 let rowId = null;
 let linkId = null;
 let pollTimer = null;
-let gracePeriod = false;
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', () => {
@@ -85,7 +93,7 @@ async function submitRowId() {
   rowId = document.getElementById('rowIdInput').value.trim();
   if (!rowId) return;
   error.textContent = '';
-  spinner.style.display = 'block'; // show spinner
+  spinner.style.display = 'block';
 
   try {
     const res = await fetch(VERIFY_URL, {
@@ -94,29 +102,22 @@ async function submitRowId() {
       body: JSON.stringify({ row_id: rowId })
     });
     const data = await res.json();
-
     if (!data.valid) {
       error.textContent = 'Invalid password';
       spinner.style.display = 'none';
       return;
     }
-
     linkId = data.link_id;
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
 
     unlockApp();
     initOneSignal(rowId);
-
-    // Grace period: prevent immediate kick
-    gracePeriod = true;
-    setTimeout(() => { gracePeriod = false; }, 4000);
-
     startPolling();
   } catch {
     error.textContent = 'Server error';
   } finally {
-    spinner.style.display = 'none'; // hide spinner
+    spinner.style.display = 'none';
   }
 }
 
@@ -127,14 +128,15 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
+/* ================= LOGOUT ================= */
 function forceLogout(reason) {
   console.warn("⛔ KICKED:", reason);
   localStorage.removeItem('rowId');
   localStorage.removeItem('linkId');
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
-  document.getElementById('appFrame').src = '';
-  document.getElementById('loginOverlay').style.display = 'flex';
+  // Keep iframe visible and optionally alert
+  alert("You have been logged out: " + reason);
 }
 
 /* ================= ONESIGNAL INIT ================= */
@@ -149,7 +151,7 @@ function initOneSignal(rowId) {
       notifyButton:{ enable:true }
     });
 
-    // Automatically set external ID
+    // Automatically set external ID for this session
     try {
       await OneSignal.login(rowId); // 🔑 Sets external_id = rowId
       const playerId = await OneSignal.getUserId();
@@ -176,8 +178,6 @@ function initOneSignal(rowId) {
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
-    if (gracePeriod) return; // skip checking during grace period
-
     const rowIdLocal = localStorage.getItem('rowId');
     if (!rowIdLocal) return;
 
