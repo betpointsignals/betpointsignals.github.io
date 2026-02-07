@@ -85,18 +85,18 @@ const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a4387
 const CHECK_LAST4 = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4";
 const POLL_MS = 15000; // 15 seconds
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
+const REGISTER_URL = "https://your-backend/register-player"; // replace with your actual register endpoint
 
 let pollTimer = null;
 
 /* ================= LOGIN ================= */
 async function submitRowId() {
-  const error = document.getElementById("loginError");
   const rowIdInput = document.getElementById("rowIdInput").value.trim();
   if (!rowIdInput) return;
-
+  
   localStorage.setItem("rowId", rowIdInput);
   unlockApp();
-  initOneSignal(rowIdInput);
+  await initOneSignal(rowIdInput); // await to ensure registration happens before polling
   startPolling();
 }
 
@@ -104,44 +104,51 @@ async function submitRowId() {
 function unlockApp() {
   document.getElementById("loginOverlay").style.display = "none";
   const frame = document.getElementById("appFrame");
-  frame.src = APP_URL; // always reload iframe
+  if (!frame.src) frame.src = APP_URL;
 }
 
 function forceLogout(reason) {
   console.warn("⛔ KICKED:", reason);
-
   localStorage.removeItem("rowId");
-  document.getElementById("rowIdInput").value = ""; // clear input
 
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
 
-  const frame = document.getElementById("appFrame");
-  frame.src = ""; // reset iframe
-
+  document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
-
-  // reset OneSignal to re-init
-  if (window.OneSignal) {
-    window.OneSignal = undefined;
-    window.OneSignalDeferred = [];
-  }
 }
 
 /* ================= ONESIGNAL ================= */
-function initOneSignal(rowId) {
+async function initOneSignal(rowId) {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function(OneSignal) {
-    await OneSignal.init({
-      appId: ONESIGNAL_APP_ID,
-      notifyButton: { enable: true }
-    });
+  return new Promise(resolve => {
+    OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: ONESIGNAL_APP_ID,
+        notifyButton: { enable: true }
+      });
 
-    const subscription = await OneSignal.User.getSubscription();
-    if (subscription?.userId) {
-      console.log("OneSignal player_id:", subscription.userId);
-      // you can register this player_id to backend if needed
-    }
+      // Force refresh subscription to ensure latest player_id is captured
+      await OneSignal.User.setSubscription(false);
+      await OneSignal.User.setSubscription(true);
+
+      const subscription = await OneSignal.User.getSubscription();
+      if (subscription?.userId) {
+        console.log("OneSignal player_id:", subscription.userId);
+
+        // Always register current player_id to backend
+        await fetch(REGISTER_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rowId,
+            player_id: subscription.userId,
+            device_type: /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web"
+          })
+        });
+      }
+      resolve();
+    });
   });
 }
 
@@ -176,11 +183,11 @@ function startPolling() {
 }
 
 /* ================= AUTO START ================= */
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   const rowId = localStorage.getItem("rowId");
   if (rowId) {
     unlockApp();
-    initOneSignal(rowId);
+    await initOneSignal(rowId);
     startPolling();
   }
 });
