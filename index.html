@@ -108,6 +108,43 @@ let rowId = null;
 let linkId = null;
 let pollTimer = null;
 let gracePeriod = false;
+let heartbeatTimer = null;
+
+/* ================= HEARTBEAT ================= */
+function startHeartbeat() {
+  stopHeartbeat();
+
+  heartbeatTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+
+    window.OneSignalDeferred?.push(async function(OneSignal) {
+      try {
+        await OneSignal.User.addTag(
+          "heartbeat",
+          Date.now().toString()
+        );
+        console.log("🫀 OneSignal heartbeat");
+      } catch (e) {
+        console.warn("Heartbeat failed", e);
+      }
+    });
+  }, 10000); // every 10 seconds
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    startHeartbeat();
+  } else {
+    stopHeartbeat();
+  }
+});
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -117,9 +154,10 @@ function setAuthState(isAuthed, reason = null) {
   if (isAuthed) {
     overlay.style.display = 'none';
 
-    // HARD reload iframe every time
     frame.onload = null;
     frame.src = APP_URL;
+
+    startHeartbeat();
 
   } else {
     console.warn("⛔ Auth revoked:", reason);
@@ -129,6 +167,8 @@ function setAuthState(isAuthed, reason = null) {
 
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
+
+    stopHeartbeat();
 
     frame.onload = null;
     frame.src = 'about:blank';
@@ -180,7 +220,6 @@ async function submitRowId() {
     localStorage.setItem('linkId', linkId);
 
     setAuthState(true);
-
     initOneSignal(rowId);
 
     gracePeriod = true;
@@ -221,6 +260,8 @@ function initOneSignal(rowId) {
           device_type: deviceType
         })
       });
+
+      startHeartbeat();
 
       console.log("OneSignal registered:", rowId, playerId);
     } catch(err) {
