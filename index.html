@@ -41,6 +41,7 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* ================= CONFIG ================= */
+const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
@@ -59,20 +60,16 @@ function setAuthState(isAuthed, reason = null) {
   const frame = document.getElementById('appFrame');
 
   if (isAuthed) {
-    console.log("✅ Auth successful");
     overlay.style.display = 'none';
     frame.src = APP_URL;
   } else {
-    console.warn("⛔ Auth revoked:", reason);
-
     localStorage.removeItem('rowId');
     localStorage.removeItem('loginCode');
-
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
-
     frame.src = 'about:blank';
     overlay.style.display = 'flex';
+    console.warn("Auth revoked:", reason);
   }
 }
 
@@ -80,11 +77,9 @@ function setAuthState(isAuthed, reason = null) {
 window.addEventListener('DOMContentLoaded', async () => {
   const savedRow = localStorage.getItem('rowId');
   const savedCode = localStorage.getItem('loginCode');
-
   if (savedRow && savedCode) {
     rowId = savedRow;
     loginCode = savedCode;
-
     setAuthState(true);
     initOneSignal(rowId);
     startPolling();
@@ -100,24 +95,25 @@ async function submitRowId() {
 
   error.textContent = '';
   spinner.style.display = 'block';
+  loginCode = crypto.randomUUID();
 
   try {
-    const res = await fetch(CHECK_LAST4, {
+    // ✅ Verify login code
+    const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ row_id: rowId })
+      body: JSON.stringify({ row_id: rowId, code: loginCode })
     });
-
     const data = await res.json();
-    console.log("Login response:", data);
+    console.log("Verify response:", data);
 
-    if (!data.success || !data.code) {
+    if (!data.valid) {
       error.textContent = 'Login failed';
       console.warn("❌ Login failed", data);
       return;
     }
 
-    loginCode = data.code;
+    // ✅ Save locally
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
 
@@ -129,7 +125,7 @@ async function submitRowId() {
 
     startPolling();
 
-  } catch (err) {
+  } catch(err) {
     console.error("Login exception:", err);
     error.textContent = 'Server error';
   } finally {
@@ -152,7 +148,7 @@ function initOneSignal(rowId) {
     try {
       await OneSignal.login(rowId);
       const playerId = await OneSignal.getUserId();
-      console.log("🎯 OneSignal playerId:", playerId);
+      console.log("OneSignal playerId:", playerId);
 
       await fetch(REGISTER_URL, {
         method:"POST",
@@ -165,7 +161,7 @@ function initOneSignal(rowId) {
         })
       });
 
-      console.log("✅ OneSignal initialized", { rowId, playerId });
+      console.log("✅ OneSignal initialized");
 
     } catch(err) {
       console.error("OneSignal error:", err);
@@ -179,23 +175,18 @@ function startPolling() {
 
   const pollFn = async () => {
     if (gracePeriod) return;
-    if (!rowId || !loginCode) {
-      console.warn("Polling skipped: rowId or loginCode missing", { rowId, loginCode });
-      return;
-    }
+    if (!rowId || !loginCode) return;
 
     try {
       const res = await fetch(CHECK_LAST4, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ row_id: rowId })
+        body: JSON.stringify({ row_id: rowId, code: loginCode })
       });
-
       const data = await res.json();
       console.log("Polling response:", data);
 
-      if (!data.success || data.code !== loginCode) {
-        console.warn("Auth invalid, logging out:", data.error || "Code mismatch");
+      if (!data.valid) {
         setAuthState(false, data.error || "Code mismatch");
       }
 
