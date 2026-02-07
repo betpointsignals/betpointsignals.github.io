@@ -5,12 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Signal Alerts — Bet Point</title>
 
-<link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#007bff">
-<link rel="apple-touch-icon" href="./icon-1024x1024.png">
-
-<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-
 <style>
 html, body {
   margin:0;
@@ -64,7 +58,6 @@ iframe {
 }
 </style>
 </head>
-
 <body>
 
 <!-- LOGIN -->
@@ -81,12 +74,22 @@ iframe {
 
 <script>
 /* ================= CONFIG ================= */
-const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-const CHECK_DB_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/check-last4"; // new function
-const POLL_MS      = 4000;
+const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const CHECK_DB_URL = "https://YOUR_BACKEND/check-betpoint-multi"; // Replace with your backend URL
+const POLL_MS = 15000; // 15 seconds
 
 let rowId = null;
 let pollTimer = null;
+
+/* ================= AUTO LOGIN ================= */
+window.addEventListener("DOMContentLoaded", () => {
+  const r = localStorage.getItem("rowId");
+  if (r) {
+    rowId = r;
+    unlockApp();
+    startPolling();
+  }
+});
 
 /* ================= LOGIN ================= */
 async function submitRowId() {
@@ -95,11 +98,25 @@ async function submitRowId() {
   if (!rowId) return;
 
   error.textContent = "";
-  localStorage.setItem("rowId", rowId);
 
-  unlockApp();
-  await initOneSignal();
-  startPolling();
+  try {
+    // Verify the password exists in your DB
+    const res = await fetch(`${CHECK_DB_URL}?row_id=${encodeURIComponent(rowId)}`);
+    const data = await res.json();
+
+    if (!data.valid) {
+      error.textContent = "Invalid password";
+      return;
+    }
+
+    localStorage.setItem("rowId", rowId);
+    unlockApp();
+    startPolling();
+
+  } catch (err) {
+    error.textContent = "Server error";
+    console.error(err);
+  }
 }
 
 /* ================= UI ================= */
@@ -109,50 +126,22 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
-async function forceLogout(reason) {
-  console.warn("⛔ HARD KICK:", reason);
-
-  try {
-    if (window.OneSignal?.User) {
-      await OneSignal.User.logout();
-    }
-  } catch {}
+function forceLogout(reason) {
+  console.warn("⛔ FORCE LOGOUT:", reason);
 
   localStorage.removeItem("rowId");
   rowId = null;
 
-  if (pollTimer) clearInterval(pollTimer);
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
   document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
 }
 
-/* =============== ONESIGNAL INIT =============== */
-async function initOneSignal() {
-  window.OneSignalDeferred = window.OneSignalDeferred || [];
-
-  return new Promise(resolve => {
-    OneSignalDeferred.push(async function (OneSignal) {
-
-      await OneSignal.init({
-        appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
-        notifyButton: { enable: true }
-      });
-
-      const oneSignalId = await OneSignal.User.getId();
-      if (!oneSignalId) {
-        forceLogout("No OneSignal player_id");
-        resolve();
-        return;
-      }
-
-      await OneSignal.login(rowId);
-
-      resolve();
-    });
-  });
-}
-
-/* =============== HARD POLLING (LAST 4 ROWS CHECK) =============== */
+/* ================= HARD POLLING ================= */
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
@@ -160,33 +149,18 @@ function startPolling() {
     if (!rowId) return;
 
     try {
-      const res = await fetch(CHECK_DB_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row_id: rowId, limit: 4 })
-      });
-
+      const res = await fetch(`${CHECK_DB_URL}?row_id=${encodeURIComponent(rowId)}`);
       const data = await res.json();
 
+      // data.valid = true if last 4 player_ids are identical
       if (!data.valid) {
-        forceLogout("Last 4 rows contain multiple player_id's");
+        forceLogout("Detected multiple devices / player_id mismatch");
       }
     } catch (err) {
-      console.error("Polling error:", err);
+      console.error("Polling error", err);
     }
   }, POLL_MS);
 }
-
-/* =============== AUTO LOGIN =============== */
-window.addEventListener("DOMContentLoaded", () => {
-  const stored = localStorage.getItem("rowId");
-  if (stored) {
-    rowId = stored;
-    unlockApp();
-    initOneSignal();
-    startPolling();
-  }
-});
 </script>
 
 </body>
