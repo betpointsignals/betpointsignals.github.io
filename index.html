@@ -23,8 +23,6 @@ iframe {
   height: 100%;
   border: none;
 }
-
-/* LOGIN OVERLAY */
 #loginOverlay {
   position: fixed;
   inset: 0;
@@ -36,12 +34,6 @@ iframe {
   color: #fff;
   z-index: 999;
 }
-
-#logo {
-  width: 140px;
-  margin-bottom: 20px;
-}
-
 #loginOverlay input {
   padding: 12px;
   font-size: 16px;
@@ -50,7 +42,6 @@ iframe {
   border: none;
   margin-bottom: 12px;
 }
-
 #loginOverlay button {
   padding: 12px 18px;
   font-size: 16px;
@@ -59,7 +50,6 @@ iframe {
   background: #007bff;
   color: #fff;
 }
-
 #loginError {
   color: #ff4d4d;
   margin-top: 12px;
@@ -70,7 +60,6 @@ iframe {
 <body>
 
 <div id="loginOverlay">
-  <img id="logo" src="./logo.png" alt="Bet Point Logo" />
   <h2>Enter Password</h2>
   <input type="password" id="passwordInput" placeholder="Password" />
   <button onclick="submitPassword()">Submit</button>
@@ -82,14 +71,21 @@ iframe {
 <script>
 /* ================= CONFIG ================= */
 const VERIFY_URL = "https://your-supabase/functions/v1/verify-link";
-const LOGIN_URL  = "https://your-supabase/functions/v1/login-update";
-const APP_URL    = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-const POLL_INTERVAL_MS = 5000;
+const LOGIN_URL = "https://your-supabase/functions/v1/login-update";
+const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
 /* ================= STATE ================= */
-let externalId = null;
-let playerId   = null;
-let pollTimer  = null;
+let externalId = null;   // password used as ID
+let playerId = null;
+
+/* ================= AUTO LOGIN ================= */
+window.addEventListener("DOMContentLoaded", async () => {
+  externalId = localStorage.getItem("external_id");
+  if (externalId) {
+    unlockApp();
+    await initOneSignal(externalId);
+  }
+});
 
 /* ================= LOGIN ================= */
 async function submitPassword() {
@@ -99,14 +95,15 @@ async function submitPassword() {
 
   error.textContent = "";
 
-  const verify = await fetch(VERIFY_URL, {
+  // Verify password
+  const res = await fetch(VERIFY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ row_id: password })
   });
 
-  const vdata = await verify.json();
-  if (!vdata.valid) {
+  const data = await res.json();
+  if (!data.valid) {
     error.textContent = "Invalid password";
     return;
   }
@@ -114,8 +111,8 @@ async function submitPassword() {
   externalId = password;
   localStorage.setItem("external_id", externalId);
 
-  await initOneSignalAndRegister(externalId);
-  startPolling();
+  unlockApp();
+  await initOneSignal(externalId);
 }
 
 /* ================= UI ================= */
@@ -124,85 +121,56 @@ function unlockApp() {
   document.getElementById("appFrame").src = APP_URL;
 }
 
-function forceLogout(reason) {
-  console.warn("⛔ FORCE LOGOUT:", reason);
-
+function forceLogout() {
   localStorage.removeItem("external_id");
   externalId = null;
   playerId = null;
-
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
-
   document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
 }
 
-/* ================= ONESIGNAL INIT + REGISTER ================= */
-async function initOneSignalAndRegister(row_id) {
+/* ================= ONESIGNAL ================= */
+async function initOneSignal(externalId) {
   return new Promise((resolve) => {
-
-    // Reset OneSignal user completely
-    window.OneSignalDeferred = [];
-    window.OneSignalDeferred.push(async function (OneSignal) {
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function (OneSignal) {
 
       await OneSignal.init({
         appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
         notifyButton: { enable: true }
       });
 
-      await OneSignal.logout();
-      await OneSignal.login(row_id);
-
+      await OneSignal.login(externalId);
       playerId = await OneSignal.User.getId();
-      if (!playerId) {
-        forceLogout("No OneSignal player_id");
-        return;
-      }
+      if (!playerId) return;
 
-      // 🔐 OVERWRITE allowed device in DB
-      await fetch(LOGIN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          row_id,
-          player_id: playerId
-        })
-      });
+      // Immediately register this player and kick old one
+      await registerCurrentDevice(externalId, playerId);
 
-      unlockApp();
       resolve();
     });
   });
 }
 
-/* ================= HARD POLLING ================= */
-function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
+/* ================= IMMEDIATE KICK ================= */
+async function registerCurrentDevice(row_id, newPlayerId) {
+  try {
+    const res = await fetch(LOGIN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ row_id, player_id: newPlayerId })
+    });
 
-  pollTimer = setInterval(async () => {
-    if (!externalId || !playerId) return;
-
-    try {
-      const res = await fetch(LOGIN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row_id: externalId })
-      });
-
-      const data = await res.json();
-
-      if (!data.player_id || data.player_id !== playerId) {
-        forceLogout("Player ID mismatch");
-      }
-    } catch (e) {
-      console.error("Polling error", e);
+    const data = await res.json();
+    // If server reports old device should logout, force it here
+    if (data.kick_old_device) {
+      console.warn("⛔ Previous device kicked");
     }
-  }, POLL_INTERVAL_MS);
+  } catch (e) {
+    console.error("Error registering device", e);
+  }
 }
 </script>
 
 </body>
-</html>
+</html> this is not loggin out just get the current player from one signal and make sure it matches the player id in onesignal_users
