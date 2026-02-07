@@ -116,11 +116,6 @@ async function submitRowId() {
   error.textContent = "";
 
   try {
-    // 🔥 HARD RESET ONESIGNAL BEFORE NEW LOGIN
-    if (window.OneSignal?.User) {
-      try { await OneSignal.User.logout(); } catch {}
-    }
-
     const res = await fetch(VERIFY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -141,8 +136,7 @@ async function submitRowId() {
     initOneSignal();
     startPolling();
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     error.textContent = "Server error";
   }
 }
@@ -154,21 +148,11 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
-/* ================= HARD KICK ================= */
-async function forceLogout(reason) {
+function forceLogout(reason) {
   console.warn("⛔ KICKED:", reason);
-
-  try {
-    if (window.OneSignal?.User) {
-      await OneSignal.User.logout();
-    }
-  } catch (e) {
-    console.warn("OneSignal logout failed", e);
-  }
 
   localStorage.removeItem("rowId");
   localStorage.removeItem("linkId");
-
   rowId = null;
   linkId = null;
 
@@ -181,11 +165,10 @@ async function forceLogout(reason) {
   document.getElementById("loginOverlay").style.display = "flex";
 }
 
-/* ================= ONESIGNAL ================= */
+/* ================= ONESIGNAL INIT ================= */
 function initOneSignal() {
-  // 🔥 Prevent stale listeners
-  window.OneSignalDeferred = [];
-
+  // Keep previous pushes, don't clear deferred
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function (OneSignal) {
 
     await OneSignal.init({
@@ -193,7 +176,7 @@ function initOneSignal() {
       path: "/signals/",
       serviceWorkerPath: "signals/OneSignalSDKWorker.js",
       serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton: { enable: true }
+      notifyButton: { enable: true, showCredit: false } // ✅ ensures bell shows
     });
 
     const rowIdLocal  = localStorage.getItem("rowId");
@@ -239,7 +222,7 @@ function startPolling() {
       const data = await res.json();
 
       if (!data.valid) {
-        await forceLogout("Device replaced");
+        forceLogout("Device replaced");
       }
 
     } catch (err) {
