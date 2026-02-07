@@ -64,6 +64,7 @@ function setAuthState(isAuthed, reason = null) {
     frame.src = APP_URL;
   } else {
     console.warn("⛔ Auth revoked:", reason);
+
     localStorage.removeItem('rowId');
     localStorage.removeItem('loginCode');
 
@@ -83,6 +84,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (savedRow && savedCode) {
     rowId = savedRow;
     loginCode = savedCode;
+
     setAuthState(true);
     initOneSignal(rowId);
     startPolling();
@@ -100,11 +102,9 @@ async function submitRowId() {
   spinner.style.display = 'block';
 
   try {
-    console.log("🔑 Attempting login with rowId:", rowId);
-
     const res = await fetch(CHECK_LAST4, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ row_id: rowId })
     });
 
@@ -118,7 +118,6 @@ async function submitRowId() {
     }
 
     loginCode = data.code;
-
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
 
@@ -144,10 +143,10 @@ function initOneSignal(rowId) {
   OneSignalDeferred.push(async function(OneSignal) {
     await OneSignal.init({
       appId: ONESIGNAL_APP_ID,
-      path: "/signals/",
-      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton: { enable: true }
+      path:"/signals/",
+      serviceWorkerPath:"signals/OneSignalSDKWorker.js",
+      serviceWorkerUpdaterPath:"signals/OneSignalSDKUpdaterWorker.js",
+      notifyButton:{ enable:true }
     });
 
     try {
@@ -156,8 +155,8 @@ function initOneSignal(rowId) {
       console.log("🎯 OneSignal playerId:", playerId);
 
       await fetch(REGISTER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
           rowId,
           loginCode,
@@ -179,27 +178,25 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
   const pollFn = async () => {
-    if (gracePeriod || !rowId || !loginCode) return;
+    if (gracePeriod) return;
+    if (!rowId || !loginCode) {
+      console.warn("Polling skipped: rowId or loginCode missing", { rowId, loginCode });
+      return;
+    }
 
     try {
       const res = await fetch(CHECK_LAST4, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row_id: rowId, code: loginCode })
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ row_id: rowId })
       });
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error("Polling fetch error:", res.status, text);
-        return;
-      }
 
       const data = await res.json();
       console.log("Polling response:", data);
 
-      if (!data.valid) {
-        console.warn("Auth invalid, logging out:", data.error || "Unknown reason");
-        setAuthState(false, data.error || "Logged in on another device");
+      if (!data.success || data.code !== loginCode) {
+        console.warn("Auth invalid, logging out:", data.error || "Code mismatch");
+        setAuthState(false, data.error || "Code mismatch");
       }
 
     } catch(err) {
@@ -207,10 +204,9 @@ function startPolling() {
     }
   };
 
-  pollFn();
+  pollFn(); // first poll immediately
   pollTimer = setInterval(pollFn, POLL_MS);
 }
 </script>
-
 </body>
 </html>
