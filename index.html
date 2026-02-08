@@ -74,7 +74,8 @@ function setAuthState(isAuthed, reason = null) {
     overlay.style.display = 'flex';
     stopCheckLoop();
     console.warn("Auth revoked:", reason);
-    autoLoginDisabled = true; // 🔹 Prevent auto-login after kick
+    autoLoginDisabled = true; // Prevent auto-login after kick
+    document.getElementById('loginError').textContent = "Logged out: " + reason;
   }
 }
 
@@ -98,7 +99,7 @@ async function submitRowId(event) {
   if (event) event.preventDefault();
   if (isSubmitting) return;
   isSubmitting = true;
-  autoLoginDisabled = false; // 🔹 allow manual login
+  autoLoginDisabled = false;
 
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
@@ -112,7 +113,7 @@ async function submitRowId(event) {
   spinner.style.display = 'block';
 
   try {
-    // Short delay to avoid race conditions
+    // Wait a short delay for trigger to generate code
     await new Promise(res => setTimeout(res, 200));
 
     const res = await fetch(CHECKLAST_URL, {
@@ -129,6 +130,7 @@ async function submitRowId(event) {
       return;
     }
 
+    // ✅ Store latest code locally
     loginCode = data.code;
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
@@ -145,7 +147,7 @@ async function submitRowId(event) {
   }
 }
 
-/* ================= CHECKLAST ================= */
+/* ================= POLL LATEST CODE ================= */
 async function checkLastLogin() {
   if (!rowId || !loginCode) return;
 
@@ -159,6 +161,7 @@ async function checkLastLogin() {
     const data = await res.json();
     console.log('🔎 checklast4:', data);
 
+    // ✅ Force logout if stored code doesn't match latest
     if (!data.success || data.code !== loginCode) {
       setAuthState(false, 'session replaced');
     }
@@ -171,7 +174,7 @@ async function checkLastLogin() {
 
 function startCheckLoop() {
   stopCheckLoop();
-  checkInterval = setInterval(checkLastLogin, 5000);
+  checkInterval = setInterval(checkLastLogin, 5000); // poll every 5s
 }
 
 function stopCheckLoop() {
@@ -220,7 +223,6 @@ function initOneSignal(rowId) {
 document.getElementById('rowIdInput').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') submitRowId(e);
 });
-
 document.getElementById('loginBtn').addEventListener('click', submitRowId);
 </script>
 
