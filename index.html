@@ -11,172 +11,6 @@
 
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
-<script type="module">
-  import { createClient } from "https://esm.sh/@supabase/supabase-js";
-
-  /* ================= CONFIG ================= */
-  const SUPABASE_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co";
-  const SUPABASE_KEY = "<YOUR_ANON_KEY>"; // anon/public key
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-  const APP_URL = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-
-  let rowId = null;
-  let loginCode = null;
-  let checkInterval = null;
-  let autoLoginDisabled = false;
-  let isSubmitting = false;
-
-  /* ================= AUTH STATE ================= */
-  function setAuthState(isAuthed, reason = null) {
-    const overlay = document.getElementById('loginOverlay');
-    const frame = document.getElementById('appFrame');
-
-    if (isAuthed) {
-      overlay.style.display = 'none';
-      frame.src = APP_URL;
-      startCheckLoop();
-    } else {
-      localStorage.removeItem('rowId');
-      localStorage.removeItem('loginCode');
-      frame.src = 'about:blank';
-      overlay.style.display = 'flex';
-      stopCheckLoop();
-      if (reason) document.getElementById('loginError').textContent = "Logged out: " + reason;
-      autoLoginDisabled = true;
-    }
-  }
-
-  /* ================= AUTO LOGIN ================= */
-  window.addEventListener('DOMContentLoaded', async () => {
-    if (autoLoginDisabled) return;
-
-    rowId = new URLSearchParams(window.location.search).get('row_id') || localStorage.getItem('rowId');
-    loginCode = localStorage.getItem('loginCode');
-
-    if (rowId && loginCode) {
-      setAuthState(true);
-    }
-  });
-
-  /* ================= LOGIN SUBMIT ================= */
-  async function submitRowId(event) {
-    if (event) event.preventDefault();
-    if (isSubmitting) return;
-    isSubmitting = true;
-    autoLoginDisabled = false;
-
-    const error = document.getElementById('loginError');
-    const spinner = document.getElementById('spinner');
-    rowId = rowId || document.getElementById('rowIdInput').value.trim();
-    if (!rowId) {
-      isSubmitting = false;
-      error.textContent = 'Please enter a password';
-      return;
-    }
-
-    error.textContent = '';
-    spinner.style.display = 'block';
-    stopCheckLoop();
-
-    try {
-      let code = null;
-
-      // 1️⃣ Call checklast4 function
-      const checkRes = await fetch(
-        'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ row_id: rowId })
-        }
-      );
-      const checkData = await checkRes.json();
-      code = checkData?.code;
-
-      // 2️⃣ Fallback: call verify-link function
-      if (!code) {
-        const verifyRes = await fetch(
-          'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ row_id: rowId })
-          }
-        );
-        const verifyData = await verifyRes.json();
-        code = verifyData?.code;
-      }
-
-      if (!code) {
-        error.textContent = 'Login failed: no code found';
-        return;
-      }
-
-      loginCode = code;
-      localStorage.setItem('rowId', rowId);
-      localStorage.setItem('loginCode', loginCode);
-      setAuthState(true);
-
-      // resume polling after 10s
-      setTimeout(startCheckLoop, 10000);
-
-    } catch (err) {
-      console.error("Login error:", err);
-      error.textContent = 'Server error';
-    } finally {
-      spinner.style.display = 'none';
-      isSubmitting = false;
-    }
-  }
-
-  /* ================= POLL SESSION ================= */
-  async function checkLastLogin() {
-    if (!rowId || !loginCode) return;
-
-    try {
-      const res = await fetch(
-        'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ row_id: rowId })
-        }
-      );
-
-      const data = await res.json();
-      const latestCode = data?.code;
-
-      if (!latestCode || latestCode !== loginCode) {
-        setAuthState(false, 'session replaced');
-      }
-
-    } catch (err) {
-      console.error('checkLastLogin error:', err);
-      setAuthState(false, 'checklast exception');
-    }
-  }
-
-  function startCheckLoop() {
-    stopCheckLoop();
-    checkInterval = setInterval(checkLastLogin, 5000);
-  }
-
-  function stopCheckLoop() {
-    if (checkInterval) {
-      clearInterval(checkInterval);
-      checkInterval = null;
-    }
-  }
-
-  /* ================= ENTER KEY SUBMIT ================= */
-  document.getElementById('rowIdInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') submitRowId(e);
-  });
-  document.getElementById('loginBtn').addEventListener('click', submitRowId);
-
-</script>
-
 <style>
 html, body { margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000; }
 iframe { width:100%; height:100%; border:none; display:block; }
@@ -197,7 +31,7 @@ iframe { width:100%; height:100%; border:none; display:block; }
   <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
   <input type="password" id="rowIdInput" placeholder="Password">
-  <button id="loginBtn">Submit</button>
+  <button onclick="submitRowId()">Submit</button>
   <div id="loginError"></div>
   <div id="spinner"></div>
 </div>
@@ -205,5 +39,222 @@ iframe { width:100%; height:100%; border:none; display:block; }
 <!-- APP -->
 <iframe id="appFrame"></iframe>
 
-</body>
-</html>
+<script>
+/* ================= CONFIG ================= */
+const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
+const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const POLL_MS      = 15000;
+const HEARTBEAT_MS = 10000;
+const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
+
+let rowId = null;
+let loginCode = null;
+let pollTimer = null;
+let heartbeatTimer = null;
+let gracePeriod = false;
+
+/* ================= HEARTBEAT ================= */
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    if (!rowId || !loginCode) return;
+
+    window.OneSignalDeferred?.push(async function(OneSignal) {
+      try {
+        await OneSignal.login(rowId);
+        console.log("🫀 OneSignal heartbeat refreshed");
+      } catch (e) {
+        console.warn("Heartbeat failed", e);
+      }
+    });
+  }, HEARTBEAT_MS);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") startHeartbeat();
+  else stopHeartbeat();
+});
+
+/* ================= AUTH STATE ================= */
+function setAuthState(isAuthed, reason = null) {
+  const overlay = document.getElementById('loginOverlay');
+  const frame = document.getElementById('appFrame');
+
+  if (isAuthed) {
+    console.log("✅ Auth successful");
+    overlay.style.display = 'none';
+    frame.src = APP_URL;
+    startHeartbeat();
+  } else {
+    console.warn("⛔ Auth revoked:", reason);
+
+    localStorage.removeItem('rowId');
+    localStorage.removeItem('loginCode');
+
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+
+    stopHeartbeat();
+
+    frame.src = 'about:blank';
+    overlay.style.display = 'flex';
+  }
+}
+
+/* ================= AUTO LOGIN ================= */
+window.addEventListener('DOMContentLoaded', () => {
+  const savedRow = localStorage.getItem('rowId');
+  const savedCode = localStorage.getItem('loginCode');
+
+  if (savedRow && savedCode) {
+    console.log("🔄 Found saved credentials", { savedRow, savedCode });
+    rowId = savedRow;
+    loginCode = savedCode;
+
+    setAuthState(true);
+    initOneSignal(rowId);
+    startPolling();
+  }
+});
+
+/* ================= LOGIN ================= */
+async function submitRowId() {
+  const error = document.getElementById('loginError');
+  const spinner = document.getElementById('spinner');
+  rowId = document.getElementById('rowIdInput').value.trim();
+  if (!rowId) return;
+
+  error.textContent = '';
+  spinner.style.display = 'block';
+
+  loginCode = crypto.randomUUID();
+
+  try {
+    console.log("🔑 Attempting login with", { rowId, loginCode });
+
+    const res = await fetch(VERIFY_URL, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ row_id: rowId, code: loginCode })
+    });
+
+    const data = await res.json();
+    console.log("Login response:", data);
+
+    if (!data.valid) {
+      error.textContent = 'Login failed';
+      console.warn("❌ Login failed", data);
+      return;
+    }
+
+    localStorage.setItem('rowId', rowId);
+    localStorage.setItem('loginCode', loginCode);
+
+    setAuthState(true);
+    initOneSignal(rowId);
+
+    gracePeriod = true;
+    setTimeout(() => gracePeriod = false, 4000);
+
+    startPolling();
+
+  } catch (err) {
+    console.error("Login exception:", err);
+    error.textContent = 'Server error';
+  } finally {
+    spinner.style.display = 'none';
+  }
+}
+
+/* ================= ONESIGNAL ================= */
+function initOneSignal(rowId) {
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.init({
+      appId: ONESIGNAL_APP_ID,
+      path:"/signals/",
+      serviceWorkerPath:"signals/OneSignalSDKWorker.js",
+      serviceWorkerUpdaterPath:"signals/OneSignalSDKUpdaterWorker.js",
+      notifyButton:{ enable:true }
+    });
+
+    try {
+      await OneSignal.login(rowId);
+      const playerId = await OneSignal.getUserId();
+      console.log("🎯 OneSignal playerId:", playerId);
+
+      await fetch(REGISTER_URL, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          rowId,
+          loginCode,
+          one_signal_id: playerId,
+          device_type: deviceType
+        })
+      });
+
+      startHeartbeat();
+      console.log("✅ OneSignal initialized", { rowId, playerId });
+
+    } catch(err) {
+      console.error("OneSignal error:", err);
+    }
+  });
+}
+
+/* ================= POLLING ================= */
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+
+  const pollFn = async () => {
+    if (gracePeriod) return;
+    if (!rowId || !loginCode) {
+      console.warn("Polling skipped: rowId or loginCode missing", { rowId, loginCode });
+      return;
+    }
+
+    try {
+      console.log("Polling checklast4 with:", { rowId, loginCode });
+
+      const res = await fetch(CHECK_LAST4, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ row_id: rowId, code: loginCode })
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Polling fetch error:", res.status, text);
+        return;
+      }
+
+      const data = await res.json();
+      console.log("Polling response:", data);
+
+      if (!data.valid) {
+        console.warn("Auth invalid, logging out:", data.error || "Unknown reason");
+        setAuthState(false, data.error || "Logged in on another device");
+      }
+
+    } catch(err) {
+      console.error("Polling exception:", err);
+    }
+  };
+
+  // 🔹 First poll immediately
+  pollFn();
+
+  // 🔹 Then start interval
+  pollTimer = setInterval(pollFn, POLL_MS); give whole update
