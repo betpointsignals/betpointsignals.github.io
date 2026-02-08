@@ -137,8 +137,11 @@ async function submitRowId() {
     localStorage.setItem('loginCode', loginCode);
 
     setAuthState(true);
+
+    // --- Step 5: grace period for 10 seconds ---
     gracePeriod = true;
-    setTimeout(() => gracePeriod = false, 3000);
+    setTimeout(() => { gracePeriod = false; }, 10000);
+
     startPolling();
 
   } catch (err) {
@@ -154,10 +157,26 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
   const pollFn = async () => {
-    if (gracePeriod) return;
     if (!rowId || !loginCode) return;
 
     try {
+      // --- Step 1: check latest code in signal_login ---
+      const { data, error: codeError } = await supabase
+        .from('signal_login')
+        .select('code')
+        .eq('row_id', rowId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!data?.code || data.code !== loginCode) {
+        if (!gracePeriod) {
+          setAuthState(false, "Logged in elsewhere");
+          return;
+        }
+      }
+
+      // --- Step 2: call checklast4 as usual ---
       const res = await fetch(CHECK_LAST4, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
@@ -166,10 +185,10 @@ function startPolling() {
 
       if (!res.ok) return;
 
-      const data = await res.json();
+      const checkData = await res.json();
 
-      if (!data.valid) {
-        setAuthState(false, data.error || "Logged in elsewhere");
+      if (!checkData.valid && !gracePeriod) {
+        setAuthState(false, checkData.error || "Logged in elsewhere");
       }
 
     } catch(err) {
