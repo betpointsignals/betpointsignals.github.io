@@ -51,6 +51,11 @@ let rowId = null;
 let loginCode = null;
 let checkInterval = null;
 
+/* ================= HELPER ================= */
+function getUrlParam(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}
+
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
   const overlay = document.getElementById('loginOverlay');
@@ -72,11 +77,11 @@ function setAuthState(isAuthed, reason = null) {
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', async () => {
-  const savedRow = localStorage.getItem('rowId');
-  const savedCode = localStorage.getItem('loginCode');
+  rowId = getUrlParam('row_id');
+  if (!rowId) return;
 
-  if (savedRow && savedCode) {
-    rowId = savedRow;
+  const savedCode = localStorage.getItem('loginCode');
+  if (savedCode) {
     loginCode = savedCode;
     setAuthState(true);
     initOneSignal(rowId);
@@ -87,34 +92,29 @@ window.addEventListener('DOMContentLoaded', async () => {
 async function submitRowId() {
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
-  rowId = document.getElementById('rowIdInput').value.trim();
+  rowId = rowId || document.getElementById('rowIdInput').value.trim();
   if (!rowId) return;
 
   error.textContent = '';
   spinner.style.display = 'block';
 
   try {
-    let code = null;
+    const res = await fetch(CHECKLAST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ row_id: rowId })
+    });
 
-    // Poll server until a code is returned
-    while (!code) {
-      const res = await fetch(CHECKLAST_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ row_id: rowId })
-      });
+    const data = await res.json();
+    console.log("checklast4 response:", data);
 
-      const data = await res.json();
-      console.log("checklast4 response:", data);
-
-      if (data.success && data.code) {
-        code = data.code;
-      } else {
-        await new Promise(r => setTimeout(r, 500)); // wait 500ms and try again
-      }
+    if (!data.success || !data.code) {
+      error.textContent = 'Login failed';
+      return;
     }
 
-    loginCode = code;
+    // use server-generated code (no extra insert)
+    loginCode = data.code;
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
 
