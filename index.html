@@ -64,6 +64,7 @@ let rowId = null;
 let linkId = null;
 let pollTimer = null;
 let gracePeriod = false;
+let latestCode = null;
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', () => {
@@ -74,7 +75,7 @@ window.addEventListener('DOMContentLoaded', () => {
     linkId = savedLink;
     unlockApp();
     initOneSignal(rowId);
-    startPolling();
+    startPolling(); // keep CHECK_LAST4 polling
   }
 });
 
@@ -85,9 +86,10 @@ async function submitRowId() {
   rowId = document.getElementById('rowIdInput').value.trim();
   if (!rowId) return;
   error.textContent = '';
-  spinner.style.display = 'block'; // show spinner
+  spinner.style.display = 'block';
 
   try {
+    // Verify password
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -108,15 +110,16 @@ async function submitRowId() {
     unlockApp();
     initOneSignal(rowId);
 
-    // Grace period: prevent immediate kick
+    // Grace period
     gracePeriod = true;
     setTimeout(() => { gracePeriod = false; }, 4000);
 
-    startPolling();
+    startPolling(); // polling CHECK_LAST4
+
   } catch {
     error.textContent = 'Server error';
   } finally {
-    spinner.style.display = 'none'; // hide spinner
+    spinner.style.display = 'none';
   }
 }
 
@@ -125,16 +128,6 @@ function unlockApp() {
   document.getElementById('loginOverlay').style.display = 'none';
   const frame = document.getElementById('appFrame');
   if (!frame.src) frame.src = APP_URL;
-}
-
-function forceLogout(reason) {
-  console.warn("⛔ KICKED:", reason);
-  localStorage.removeItem('rowId');
-  localStorage.removeItem('linkId');
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = null;
-  document.getElementById('appFrame').src = '';
-  document.getElementById('loginOverlay').style.display = 'flex';
 }
 
 /* ================= ONESIGNAL INIT ================= */
@@ -149,9 +142,8 @@ function initOneSignal(rowId) {
       notifyButton:{ enable:true }
     });
 
-    // Automatically set external ID
     try {
-      await OneSignal.login(rowId); // 🔑 Sets external_id = rowId
+      await OneSignal.login(rowId); // set external_id
       const playerId = await OneSignal.getUserId();
 
       // Save playerId to backend
@@ -172,11 +164,11 @@ function initOneSignal(rowId) {
   });
 }
 
-/* ================= HARD KICK POLLING ================= */
+/* ================= POLLING CHECK_LAST4 ================= */
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
-    if (gracePeriod) return; // skip checking during grace period
+    if (gracePeriod) return;
 
     const rowIdLocal = localStorage.getItem('rowId');
     if (!rowIdLocal) return;
@@ -191,10 +183,18 @@ function startPolling() {
       if (!res.ok) return console.error("Poll fetch error:", res.statusText);
 
       const data = await res.json();
-      if (!data.valid) {
-        console.warn("Last 4 player IDs mismatch:", data.last4_player_ids);
-        forceLogout("Detected multiple devices or player_id change");
+      
+      // Store latest code from CHECK_LAST4 response
+      if (data && data.last4_player_ids && data.last4_player_ids.length > 0) {
+        // Assuming last inserted is last element
+        latestCode = data.last4_player_ids[data.last4_player_ids.length - 1];
+        localStorage.setItem('latestCode', latestCode);
+        console.log("Latest code stored from CHECK_LAST4:", latestCode);
       }
+
+      // Do NOT kick out in this version
+      // if (!data.valid) { forceLogout(...) } <-- removed intentionally
+
     } catch(err) {
       console.error("Polling error:", err);
     }
@@ -202,4 +202,4 @@ function startPolling() {
 }
 </script>
 </body>
-</html> 
+</html>
