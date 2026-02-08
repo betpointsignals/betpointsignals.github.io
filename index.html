@@ -114,22 +114,22 @@ async function submitRowId() {
     gracePeriod = true;
     setTimeout(() => { gracePeriod = false; }, 4000);
 
-    startPolling(); // polling CHECK_LAST4
+    startPolling(); // polling CHECK_LAST4 continuously
 
     // ✅ Generate code in frontend
-    const generatedCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-    latestCode = generatedCode;
+    latestCode = Math.random().toString(36).substring(2, 10).toUpperCase(); // 8-char code
     localStorage.setItem('latestCode', latestCode);
     console.log("Generated code:", latestCode);
 
-    // ✅ Send generated code along with row_id to CHECK_LAST4 to store
+    // ✅ Send generated code along with row_id to CHECK_LAST4 (store in DB)
     await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ row_id, code: latestCode })
-    }).then(r => r.json())
-      .then(res => console.log("checklast4 store response:", res))
-      .catch(err => console.error("Error storing code in checklast4:", err));
+    })
+    .then(r => r.json())
+    .then(res => console.log("checklast4 insert response:", res))
+    .catch(err => console.error("Error sending code to checklast4:", err));
 
   } catch (err) {
     console.error("submitRowId error:", err);
@@ -193,22 +193,19 @@ function startPolling() {
       const res = await fetch(CHECK_LAST4, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ row_id: rowIdLocal })
+        body: JSON.stringify({ row_id: rowIdLocal }) // polling just row_id
       });
 
       if (!res.ok) return console.error("Poll fetch error:", res.statusText);
 
       const data = await res.json();
       
-      // Store latest code from CHECK_LAST4 response (optional if needed)
+      // Update latest code from CHECK_LAST4 response
       if (data && data.last4_player_ids && data.last4_player_ids.length > 0) {
         latestCode = data.last4_player_ids[data.last4_player_ids.length - 1];
         localStorage.setItem('latestCode', latestCode);
         console.log("Latest code stored from CHECK_LAST4:", latestCode);
       }
-
-      // Do NOT kick out in this version
-      // if (!data.valid) { forceLogout(...) } <-- removed intentionally
 
     } catch(err) {
       console.error("Polling error:", err);
