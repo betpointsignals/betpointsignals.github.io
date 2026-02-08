@@ -9,8 +9,6 @@
 <meta name="theme-color" content="#007bff">
 <link rel="apple-touch-icon" href="./icon-1024x1024.png">
 
-<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-
 <style>
 html, body { margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000; }
 iframe { width:100%; height:100%; border:none; display:block; }
@@ -41,50 +39,15 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* ================= CONFIG ================= */
-const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
-const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const POLL_MS      = 15000;
-const HEARTBEAT_MS = 10000;
-const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
-const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
+const POLL_MS      = 5000;
 
 let rowId = null;
 let loginCode = null;
 let pollTimer = null;
-let heartbeatTimer = null;
 let gracePeriod = false;
-
-/* ================= HEARTBEAT ================= */
-function startHeartbeat() {
-  stopHeartbeat();
-  heartbeatTimer = setInterval(() => {
-    if (document.visibilityState !== 'visible') return;
-    if (!rowId || !loginCode) return;
-
-    window.OneSignalDeferred?.push(async function(OneSignal) {
-      try {
-        await OneSignal.login(rowId);
-        console.log("🫀 OneSignal heartbeat refreshed");
-      } catch (e) {
-        console.warn("Heartbeat failed", e);
-      }
-    });
-  }, HEARTBEAT_MS);
-}
-
-function stopHeartbeat() {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-  }
-}
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") startHeartbeat();
-  else stopHeartbeat();
-});
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -92,23 +55,16 @@ function setAuthState(isAuthed, reason = null) {
   const frame = document.getElementById('appFrame');
 
   if (isAuthed) {
-    console.log("✅ Auth successful");
     overlay.style.display = 'none';
     frame.src = APP_URL;
-    startHeartbeat();
   } else {
-    console.warn("⛔ Auth revoked:", reason);
-
     localStorage.removeItem('rowId');
     localStorage.removeItem('loginCode');
-
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = null;
-
-    stopHeartbeat();
-
     frame.src = 'about:blank';
     overlay.style.display = 'flex';
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+    if (reason) document.getElementById('loginError').textContent = "Logged out: " + reason;
   }
 }
 
@@ -118,12 +74,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedCode = localStorage.getItem('loginCode');
 
   if (savedRow && savedCode) {
-    console.log("🔄 Found saved credentials", { savedRow, savedCode });
     rowId = savedRow;
     loginCode = savedCode;
-
     setAuthState(true);
-    initOneSignal(rowId);
     startPolling();
   }
 });
@@ -141,20 +94,16 @@ async function submitRowId() {
   loginCode = crypto.randomUUID();
 
   try {
-    console.log("🔑 Attempting login with", { rowId, loginCode });
-
+    // Call verify-link to check password/code
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ row_id: rowId, code: loginCode })
     });
-
     const data = await res.json();
-    console.log("Login response:", data);
 
     if (!data.valid) {
       error.textContent = 'Login failed';
-      console.warn("❌ Login failed", data);
       return;
     }
 
@@ -162,10 +111,9 @@ async function submitRowId() {
     localStorage.setItem('loginCode', loginCode);
 
     setAuthState(true);
-    initOneSignal(rowId);
 
     gracePeriod = true;
-    setTimeout(() => gracePeriod = false, 4000);
+    setTimeout(() => gracePeriod = false, 3000);
 
     startPolling();
 
@@ -177,75 +125,27 @@ async function submitRowId() {
   }
 }
 
-/* ================= ONESIGNAL ================= */
-function initOneSignal(rowId) {
-  window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function(OneSignal) {
-    await OneSignal.init({
-      appId: ONESIGNAL_APP_ID,
-      path:"/signals/",
-      serviceWorkerPath:"signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath:"signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton:{ enable:true }
-    });
-
-    try {
-      await OneSignal.login(rowId);
-      const playerId = await OneSignal.getUserId();
-      console.log("🎯 OneSignal playerId:", playerId);
-
-      await fetch(REGISTER_URL, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({
-          rowId,
-          loginCode,
-          one_signal_id: playerId,
-          device_type: deviceType
-        })
-      });
-
-      startHeartbeat();
-      console.log("✅ OneSignal initialized", { rowId, playerId });
-
-    } catch(err) {
-      console.error("OneSignal error:", err);
-    }
-  });
-}
-
 /* ================= POLLING ================= */
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
   const pollFn = async () => {
     if (gracePeriod) return;
-    if (!rowId || !loginCode) {
-      console.warn("Polling skipped: rowId or loginCode missing", { rowId, loginCode });
-      return;
-    }
+    if (!rowId || !loginCode) return;
 
     try {
-      console.log("Polling checklast4 with:", { rowId, loginCode });
-
       const res = await fetch(CHECK_LAST4, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ row_id: rowId, code: loginCode })
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        console.error("Polling fetch error:", res.status, text);
-        return;
-      }
+      if (!res.ok) return;
 
       const data = await res.json();
-      console.log("Polling response:", data);
 
       if (!data.valid) {
-        console.warn("Auth invalid, logging out:", data.error || "Unknown reason");
-        setAuthState(false, data.error || "Logged in on another device");
+        setAuthState(false, data.error || "Logged in elsewhere");
       }
 
     } catch(err) {
@@ -253,8 +153,15 @@ function startPolling() {
     }
   };
 
-  // 🔹 First poll immediately
-  pollFn();
+  pollFn(); // first poll immediately
+  pollTimer = setInterval(pollFn, POLL_MS);
+}
 
-  // 🔹 Then start interval
-  pollTimer = setInterval(pollFn, POLL_MS); give whole update
+/* ================= ENTER KEY SUBMIT ================= */
+document.getElementById('rowIdInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitRowId();
+});
+</script>
+
+</body>
+</html>
