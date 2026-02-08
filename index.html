@@ -10,12 +10,13 @@
 <link rel="apple-touch-icon" href="./icon-1024x1024.png">
 
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+
 <script type="module">
   import { createClient } from "https://esm.sh/@supabase/supabase-js";
 
   /* ================= CONFIG ================= */
   const SUPABASE_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co";
-  const SUPABASE_KEY = "<YOUR_ANON_KEY>"; // Make sure this is anon key
+  const SUPABASE_KEY = "<YOUR_ANON_KEY>"; // anon/public key
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const APP_URL = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
@@ -41,9 +42,7 @@
       frame.src = 'about:blank';
       overlay.style.display = 'flex';
       stopCheckLoop();
-      if (reason) {
-        document.getElementById('loginError').textContent = "Logged out: " + reason;
-      }
+      if (reason) document.getElementById('loginError').textContent = "Logged out: " + reason;
       autoLoginDisabled = true;
     }
   }
@@ -52,19 +51,15 @@
   window.addEventListener('DOMContentLoaded', async () => {
     if (autoLoginDisabled) return;
 
-    rowId = new URLSearchParams(window.location.search).get('row_id');
-    if (!rowId) {
-      rowId = localStorage.getItem('rowId') || null;
-    }
+    rowId = new URLSearchParams(window.location.search).get('row_id') || localStorage.getItem('rowId');
+    loginCode = localStorage.getItem('loginCode');
 
-    const savedCode = localStorage.getItem('loginCode');
-    if (rowId && savedCode) {
-      loginCode = savedCode;
+    if (rowId && loginCode) {
       setAuthState(true);
     }
   });
 
-  /* ================= LOGIN ================= */
+  /* ================= LOGIN SUBMIT ================= */
   async function submitRowId(event) {
     if (event) event.preventDefault();
     if (isSubmitting) return;
@@ -82,33 +77,35 @@
 
     error.textContent = '';
     spinner.style.display = 'block';
-    stopCheckLoop(); // suspend normal polling while waiting for code
+    stopCheckLoop();
 
     try {
       let code = null;
-      const start = Date.now();
 
-      // Poll the table for latest code for up to 5s
-      while (!code && Date.now() - start < 5000) {
-        const { data, error: fetchError } = await supabase
-          .from('signal_login')
-          .select('code')
-          .eq('row_id', rowId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (fetchError) {
-          console.error('Supabase fetch error:', fetchError);
+      // 1️⃣ Call checklast4 function
+      const checkRes = await fetch(
+        'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ row_id: rowId })
         }
+      );
+      const checkData = await checkRes.json();
+      code = checkData?.code;
 
-        if (data?.code) {
-          code = data.code;
-          break;
-        }
-
-        // Wait 500ms before retry
-        await new Promise(r => setTimeout(r, 500));
+      // 2️⃣ Fallback: call verify-link function
+      if (!code) {
+        const verifyRes = await fetch(
+          'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ row_id: rowId })
+          }
+        );
+        const verifyData = await verifyRes.json();
+        code = verifyData?.code;
       }
 
       if (!code) {
@@ -119,10 +116,9 @@
       loginCode = code;
       localStorage.setItem('rowId', rowId);
       localStorage.setItem('loginCode', loginCode);
-
       setAuthState(true);
 
-      // resume session polling after 10s
+      // resume polling after 10s
       setTimeout(startCheckLoop, 10000);
 
     } catch (err) {
@@ -139,25 +135,24 @@
     if (!rowId || !loginCode) return;
 
     try {
-      const { data, error } = await supabase
-        .from('signal_login')
-        .select('code')
-        .eq('row_id', rowId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const res = await fetch(
+        'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ row_id: rowId })
+        }
+      );
 
-      if (error) {
-        console.error('checkLastLogin fetch error:', error);
-        return;
-      }
+      const data = await res.json();
+      const latestCode = data?.code;
 
-      if (!data?.code || data.code !== loginCode) {
+      if (!latestCode || latestCode !== loginCode) {
         setAuthState(false, 'session replaced');
       }
 
     } catch (err) {
-      console.error('checkLastLogin exception:', err);
+      console.error('checkLastLogin error:', err);
       setAuthState(false, 'checklast exception');
     }
   }
