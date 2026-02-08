@@ -42,15 +42,14 @@ iframe { width:100%; height:100%; border:none; display:block; }
 <script>
 /* ================= CONFIG ================= */
 const CHECKLAST_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
-const REGISTER_URL  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
-const APP_URL       = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const deviceType    = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let loginCode = null;
 let checkInterval = null;
-let loginInProgress = false;
 
 /* ================= HELPER ================= */
 function getUrlParam(name) {
@@ -91,27 +90,21 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 /* ================= LOGIN ================= */
 async function submitRowId() {
-  if (loginInProgress) return; // prevent double submissions
-  loginInProgress = true;
-
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
   rowId = rowId || document.getElementById('rowIdInput').value.trim();
-  if (!rowId) {
-    loginInProgress = false;
-    return;
-  }
+  if (!rowId) return;
 
   error.textContent = '';
   spinner.style.display = 'block';
 
   try {
+    // ✅ Get the latest code for this row_id
     const res = await fetch(CHECKLAST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ row_id: rowId })
     });
-
     const data = await res.json();
     console.log("checklast4 response:", data);
 
@@ -120,7 +113,6 @@ async function submitRowId() {
       return;
     }
 
-    // ✅ use server-generated code
     loginCode = data.code;
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
@@ -133,7 +125,6 @@ async function submitRowId() {
     error.textContent = 'Server error';
   } finally {
     spinner.style.display = 'none';
-    loginInProgress = false;
   }
 }
 
