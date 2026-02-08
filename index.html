@@ -56,12 +56,14 @@ const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/veri
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const POLL_MS      = 15000;
 const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let linkId = null;
-let latestCode = null;
+let pollTimer = null;
+let gracePeriod = false;
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', () => {
@@ -72,20 +74,20 @@ window.addEventListener('DOMContentLoaded', () => {
     linkId = savedLink;
     unlockApp();
     initOneSignal(rowId);
+    startPolling();
   }
 });
 
-/* ================= LOGIN & CODE GENERATION ================= */
+/* ================= LOGIN ================= */
 async function submitRowId() {
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
   rowId = document.getElementById('rowIdInput').value.trim();
   if (!rowId) return;
   error.textContent = '';
-  spinner.style.display = 'block';
+  spinner.style.display = 'block'; // show spinner
 
   try {
-    // 1️⃣ Verify password
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -106,28 +108,15 @@ async function submitRowId() {
     unlockApp();
     initOneSignal(rowId);
 
-    // 2️⃣ Generate code in frontend (once)
-    latestCode = Math.random().toString(36).substring(2, 10).toUpperCase(); // 8-char
-    localStorage.setItem('latestCode', latestCode);
-    console.log("Generated code:", latestCode);
+    // Grace period: prevent immediate kick
+    gracePeriod = true;
+    setTimeout(() => { gracePeriod = false; }, 4000);
 
-    // 3️⃣ Call CHECK_LAST4 once to store code in DB
-    const insertRes = await fetch(CHECK_LAST4, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id, code: latestCode })
-    });
-
-    const insertData = await insertRes.json().catch(e=>{
-      console.error("Failed parsing checklast4 response:", e);
-    });
-    console.log("checklast4 insert response:", insertData);
-
-  } catch (err) {
-    console.error("submitRowId error:", err);
+    startPolling();
+  } catch {
     error.textContent = 'Server error';
   } finally {
-    spinner.style.display = 'none';
+    spinner.style.display = 'none'; // hide spinner
   }
 }
 
@@ -136,6 +125,16 @@ function unlockApp() {
   document.getElementById('loginOverlay').style.display = 'none';
   const frame = document.getElementById('appFrame');
   if (!frame.src) frame.src = APP_URL;
+}
+
+function forceLogout(reason) {
+  console.warn("⛔ KICKED:", reason);
+  localStorage.removeItem('rowId');
+  localStorage.removeItem('linkId');
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  document.getElementById('appFrame').src = '';
+  document.getElementById('loginOverlay').style.display = 'flex';
 }
 
 /* ================= ONESIGNAL INIT ================= */
@@ -150,8 +149,9 @@ function initOneSignal(rowId) {
       notifyButton:{ enable:true }
     });
 
+    // Automatically set external ID
     try {
-      await OneSignal.login(rowId); // set external_id
+      await OneSignal.login(rowId); // 🔑 Sets external_id = rowId
       const playerId = await OneSignal.getUserId();
 
       // Save playerId to backend
@@ -171,6 +171,35 @@ function initOneSignal(rowId) {
     }
   });
 }
+
+/* ================= HARD KICK POLLING ================= */
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if (gracePeriod) return; // skip checking during grace period
+
+    const rowIdLocal = localStorage.getItem('rowId');
+    if (!rowIdLocal) return;
+
+    try {
+      const res = await fetch(CHECK_LAST4, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ row_id: rowIdLocal })
+      });
+
+      if (!res.ok) return console.error("Poll fetch error:", res.statusText);
+
+      const data = await res.json();
+      if (!data.valid) {
+        console.warn("Last 4 player IDs mismatch:", data.last4_player_ids);
+        forceLogout("Detected multiple devices or player_id change");
+      }
+    } catch(err) {
+      console.error("Polling error:", err);
+    }
+  }, POLL_MS);
+}
 </script>
 </body>
-</html>
+</html> 
