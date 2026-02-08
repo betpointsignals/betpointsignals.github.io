@@ -41,17 +41,19 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* ================= CONFIG ================= */
-const LOGIN_URL    = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/login-submit';
-const CHECKLAST_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
-const REGISTER_URL  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
-const APP_URL       = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const deviceType    = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
-const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
+const LOGIN_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/login-submit';
+const APP_URL   = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 
 let rowId = null;
 let loginCode = null;
 let checkInterval = null;
+let autoLoginDisabled = false;
 let isSubmitting = false;
+
+/* ================= HELPER ================= */
+function getUrlParam(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -68,16 +70,31 @@ function setAuthState(isAuthed, reason = null) {
     frame.src = 'about:blank';
     overlay.style.display = 'flex';
     stopCheckLoop();
-    console.warn("Auth revoked:", reason);
     document.getElementById('loginError').textContent = "Logged out: " + reason;
+    autoLoginDisabled = true;
   }
 }
+
+/* ================= AUTO LOGIN ================= */
+window.addEventListener('DOMContentLoaded', async () => {
+  if (autoLoginDisabled) return;
+
+  rowId = getUrlParam('row_id');
+  if (!rowId) return;
+
+  const savedCode = localStorage.getItem('loginCode');
+  if (savedCode) {
+    loginCode = savedCode;
+    setAuthState(true);
+  }
+});
 
 /* ================= LOGIN ================= */
 async function submitRowId(event) {
   if (event) event.preventDefault();
   if (isSubmitting) return;
   isSubmitting = true;
+  autoLoginDisabled = false;
 
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
@@ -91,7 +108,6 @@ async function submitRowId(event) {
   spinner.style.display = 'block';
 
   try {
-    // Submit login, which inserts a row and waits for trigger to generate code
     const res = await fetch(LOGIN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -111,7 +127,6 @@ async function submitRowId(event) {
     localStorage.setItem('loginCode', loginCode);
 
     setAuthState(true);
-    initOneSignal(rowId);
 
   } catch (err) {
     console.error("Login error:", err);
@@ -127,16 +142,16 @@ async function checkLastLogin() {
   if (!rowId || !loginCode) return;
 
   try {
-    const res = await fetch(CHECKLAST_URL, {
+    const res = await fetch(LOGIN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ row_id: rowId })
     });
 
     const data = await res.json();
-    console.log('🔎 checklast4:', data);
+    console.log('🔎 checklast-login:', data);
 
-    if (!data.success || data.code !== loginCode) {
+    if (!data.success || data.row?.code !== loginCode) {
       setAuthState(false, 'session replaced');
     }
 
@@ -156,41 +171,6 @@ function stopCheckLoop() {
     clearInterval(checkInterval);
     checkInterval = null;
   }
-}
-
-/* ================= ONESIGNAL ================= */
-function initOneSignal(rowId) {
-  window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function(OneSignal) {
-    await OneSignal.init({
-      appId: ONESIGNAL_APP_ID,
-      path: "/signals/",
-      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton: { enable: true }
-    });
-
-    try {
-      await OneSignal.login(rowId);
-      const playerId = await OneSignal.getUserId();
-
-      await fetch(REGISTER_URL, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({
-          rowId,
-          loginCode,
-          one_signal_id: playerId,
-          device_type: deviceType
-        })
-      });
-
-      console.log("✅ OneSignal ready");
-
-    } catch (err) {
-      console.error("OneSignal error:", err);
-    }
-  });
 }
 
 /* ================= ENTER KEY SUBMIT ================= */
