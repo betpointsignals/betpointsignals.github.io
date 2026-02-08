@@ -18,7 +18,7 @@ iframe { width:100%; height:100%; border:none; display:block; }
 #loginOverlay img { width:96px; height:96px; margin-bottom:16px; }
 #loginOverlay input { padding:12px; font-size:16px; width:220px; border-radius:6px; border:none; margin-bottom:12px; }
 #loginOverlay button { padding:12px 18px; font-size:16px; border-radius:6px; border:none; background:#007bff; color:#fff; cursor:pointer; }
-#loginError { color:#ff4d4d; margin-top:12px; text-align:center; }
+#loginError { color:#ff4d4d; margin-top:12px; }
 #spinner { border:4px solid rgba(255,255,255,0.2); border-top:4px solid #007bff; border-radius:50%; width:36px; height:36px; animation:spin 1s linear infinite; margin-top:12px; display:none; }
 @keyframes spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
 </style>
@@ -41,6 +41,7 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* ================= CONFIG ================= */
+const LOGIN_URL    = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/login-submit';
 const CHECKLAST_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const REGISTER_URL  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const APP_URL       = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
@@ -50,13 +51,7 @@ const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 let rowId = null;
 let loginCode = null;
 let checkInterval = null;
-let autoLoginDisabled = false;
 let isSubmitting = false;
-
-/* ================= HELPER ================= */
-function getUrlParam(name) {
-  return new URLSearchParams(window.location.search).get(name);
-}
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -74,48 +69,15 @@ function setAuthState(isAuthed, reason = null) {
     overlay.style.display = 'flex';
     stopCheckLoop();
     console.warn("Auth revoked:", reason);
-    autoLoginDisabled = true; 
     document.getElementById('loginError').textContent = "Logged out: " + reason;
   }
 }
 
-/* ================= AUTO LOGIN ================= */
-window.addEventListener('DOMContentLoaded', async () => {
-  if (autoLoginDisabled) return;
-
-  rowId = getUrlParam('row_id');
-  if (!rowId) return;
-
-  try {
-    const res = await fetch(CHECKLAST_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ row_id: rowId })
-    });
-
-    const data = await res.json();
-    console.log("auto-login checklast4 response:", data);
-
-    if (!data.success || !data.code) return; // skip if no latest code
-
-    loginCode = data.code;
-    localStorage.setItem('rowId', rowId);
-    localStorage.setItem('loginCode', loginCode);
-
-    setAuthState(true);
-    initOneSignal(rowId);
-
-  } catch (err) {
-    console.error("Auto-login error:", err);
-  }
-});
-
-/* ================= MANUAL LOGIN ================= */
+/* ================= LOGIN ================= */
 async function submitRowId(event) {
   if (event) event.preventDefault();
   if (isSubmitting) return;
   isSubmitting = true;
-  autoLoginDisabled = false;
 
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
@@ -129,23 +91,22 @@ async function submitRowId(event) {
   spinner.style.display = 'block';
 
   try {
-    await new Promise(res => setTimeout(res, 200)); // wait a short delay
-
-    const res = await fetch(CHECKLAST_URL, {
+    // Submit login, which inserts a row and waits for trigger to generate code
+    const res = await fetch(LOGIN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ row_id: rowId })
     });
 
     const data = await res.json();
-    console.log("manual login checklast4 response:", data);
+    console.log("login-submit response:", data);
 
-    if (!data.success || !data.code) {
+    if (!data.success || !data.row?.code) {
       error.textContent = 'Login failed';
       return;
     }
 
-    loginCode = data.code;
+    loginCode = data.row.code;
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
 
@@ -173,14 +134,14 @@ async function checkLastLogin() {
     });
 
     const data = await res.json();
-    console.log('🔎 poll checklast4:', data);
+    console.log('🔎 checklast4:', data);
 
     if (!data.success || data.code !== loginCode) {
       setAuthState(false, 'session replaced');
     }
 
   } catch (err) {
-    console.error('checklast polling error:', err);
+    console.error('checklast error:', err);
     setAuthState(false, 'checklast exception');
   }
 }
