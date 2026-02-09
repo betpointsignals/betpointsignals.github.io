@@ -14,28 +14,37 @@
 <style>
 html, body { margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000; }
 iframe { width:100%; height:100%; border:none; display:block; }
-#loginOverlay { position:fixed; inset:0; background:#000; display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:999; color:#fff; }
-#loginOverlay img { width:96px; height:96px; margin-bottom:16px; }
+
+#installOverlay, #loginOverlay {
+  position:fixed; inset:0; background:#000; display:flex;
+  flex-direction:column; justify-content:center; align-items:center; z-index:1000; color:#fff;
+}
+#installOverlay img, #loginOverlay img { width:96px; height:96px; margin-bottom:16px; }
+#installOverlay p { font-size:18px; text-align:center; margin:0 20px 16px; }
 #loginOverlay input { padding:12px; font-size:16px; width:220px; border-radius:6px; border:none; margin-bottom:12px; }
-#loginOverlay button { padding:12px 18px; font-size:16px; border-radius:6px; border:none; background:#007bff; color:#fff; cursor:pointer; }
+#loginOverlay button, #installOverlay button {
+  padding:12px 18px; font-size:16px; border-radius:6px; border:none; background:#007bff; color:#fff; cursor:pointer;
+}
 #loginError { color:#ff4d4d; margin-top:12px; }
 #spinner {
   border: 4px solid rgba(255, 255, 255, 0.2);
   border-top: 4px solid #007bff;
   border-radius: 50%;
-  width: 36px;
-  height: 36px;
+  width: 36px; height: 36px;
   animation: spin 1s linear infinite;
-  margin-top:12px;
-  display:none;
+  margin-top:12px; display:none;
 }
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
+
+<!-- ADD TO HOME SCREEN -->
+<div id="installOverlay" style="display:none;">
+  <img src="./icon-1024x1024.png" alt="Logo">
+  <p>To get the best experience, add this app to your home screen.<br>Then enter your password and click the red bell to subscribe to signals.</p>
+  <button onclick="hideInstallOverlay()">OK</button>
+</div>
 
 <!-- LOGIN -->
 <div id="loginOverlay">
@@ -56,15 +65,26 @@ const VERIFY_URL       = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/
 const REGISTER_URL     = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4      = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const HEARTBEAT_URL    = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat';
-const POLL_MS          = 10000; // 10 seconds
-const GRACE_MS         = 4000;  // 4 seconds grace period for current device
+const POLL_MS          = 10000;
+const GRACE_MS         = 4000;
 const deviceType       = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
-let rowId = null;
-let linkId = null;
-let pollInterval = null;
-let gracePeriod = false;
+let rowId = null, linkId = null, pollInterval = null, gracePeriod = false;
+
+/* ================= INSTALL OVERLAY ================= */
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function showInstallOverlay() {
+  document.getElementById('installOverlay').style.display = 'flex';
+}
+function hideInstallOverlay() {
+  document.getElementById('installOverlay').style.display = 'none';
+}
+window.addEventListener('DOMContentLoaded', () => {
+  if (!isStandalone()) showInstallOverlay();
+});
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', () => {
@@ -87,155 +107,73 @@ async function submitRowId() {
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
   rowId = document.getElementById('rowIdInput').value.trim();
-  if (!rowId) {
-    error.textContent = 'Please enter a password';
-    return;
-  }
+  if (!rowId) { error.textContent = 'Please enter a password'; return; }
 
   error.textContent = '';
   spinner.style.display = 'block';
 
   try {
-    // Verify password
-    const res = await fetch(VERIFY_URL, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ row_id: rowId })
-    });
+    const res = await fetch(VERIFY_URL, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ row_id: rowId }) });
     const data = await res.json();
-
-    if (!data.valid) {
-      error.textContent = 'Invalid password';
-      spinner.style.display = 'none';
-      return;
-    }
+    if (!data.valid) { error.textContent = 'Invalid password'; spinner.style.display='none'; return; }
 
     linkId = data.link_id;
-
-    // ✅ Generate new code
     const newCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-    console.log("Generated code:", newCode);
-
-    // ✅ Save to localStorage
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
     localStorage.setItem('latestCode', newCode);
 
-    // ✅ Send the code from localStorage
     const codeToSend = localStorage.getItem('latestCode');
-    console.log("Sending code from localStorage:", codeToSend);
-
-    await fetch(CHECK_LAST4, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId, code: codeToSend })
-    });
+    await fetch(CHECK_LAST4, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ row_id: rowId, code: codeToSend }) });
 
     hideLoginOverlay();
     initOneSignal(rowId);
 
-    // ✅ Start heartbeat polling
     gracePeriod = true;
-    setTimeout(() => { gracePeriod = false; }, GRACE_MS);
+    setTimeout(()=>{gracePeriod=false;}, GRACE_MS);
     startHeartbeatPolling();
 
-  } catch (err) {
-    console.error("submitRowId error:", err);
-    error.textContent = 'Server error';
-  } finally {
-    spinner.style.display = 'none';
-  }
+  } catch(err) { console.error("submitRowId error:", err); error.textContent='Server error'; }
+  finally { spinner.style.display='none'; }
 }
 
 /* ================= UI ================= */
-function hideLoginOverlay() {
-  document.getElementById('loginOverlay').style.display = 'none';
-}
-
-function showLoginOverlay() {
-  document.getElementById('loginOverlay').style.display = 'flex';
-}
-
-function forceLogout(reason) {
-  console.warn("⛔ KICKED:", reason || "Code mismatch");
-
-  // Clear localStorage but DO NOT clear iframe
-  localStorage.removeItem('rowId');
-  localStorage.removeItem('linkId');
-  localStorage.removeItem('latestCode');
-
-  rowId = null;
-  linkId = null;
-
-  // Show login overlay
-  showLoginOverlay();
-
-  if (pollInterval) clearInterval(pollInterval);
-  gracePeriod = false;
+function hideLoginOverlay(){ document.getElementById('loginOverlay').style.display='none'; }
+function showLoginOverlay(){ document.getElementById('loginOverlay').style.display='flex'; }
+function forceLogout(reason){
+  console.warn("⛔ KICKED:", reason||"Code mismatch");
+  localStorage.removeItem('rowId'); localStorage.removeItem('linkId'); localStorage.removeItem('latestCode');
+  rowId = null; linkId = null; showLoginOverlay();
+  if(pollInterval) clearInterval(pollInterval); gracePeriod=false;
 }
 
 /* ================= ONESIGNAL INIT ================= */
-function initOneSignal(rowId) {
+function initOneSignal(rowId){
   window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function(OneSignal) {
-    await OneSignal.init({
-      appId: ONESIGNAL_APP_ID,
-      path:"/signals/",
-      serviceWorkerPath:"signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath:"signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton:{ enable:true }
-    });
-
-    try {
-      await OneSignal.login(rowId);
-      const playerId = await OneSignal.getUserId();
-      await fetch(REGISTER_URL, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ rowId, linkId, one_signal_id: playerId, device_type: deviceType })
-      });
+  OneSignalDeferred.push(async function(OneSignal){
+    await OneSignal.init({ appId: ONESIGNAL_APP_ID, path:"/signals/", serviceWorkerPath:"signals/OneSignalSDKWorker.js", serviceWorkerUpdaterPath:"signals/OneSignalSDKUpdaterWorker.js", notifyButton:{ enable:true }});
+    try{ await OneSignal.login(rowId); const playerId = await OneSignal.getUserId();
+      await fetch(REGISTER_URL,{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ rowId, linkId, one_signal_id: playerId, device_type: deviceType })});
       console.log("External ID set:", rowId, playerId);
-    } catch(err) {
-      console.error("OneSignal init error:", err);
-    }
+    }catch(err){ console.error("OneSignal init error:", err); }
   });
 }
 
 /* ================= HEARTBEAT POLLING ================= */
-function startHeartbeatPolling() {
-  if (pollInterval) clearInterval(pollInterval);
-  checkHeartbeat(); // immediate check
-  pollInterval = setInterval(checkHeartbeat, POLL_MS);
+function startHeartbeatPolling(){
+  if(pollInterval) clearInterval(pollInterval);
+  checkHeartbeat(); pollInterval=setInterval(checkHeartbeat,POLL_MS);
 }
-
-async function checkHeartbeat() {
-  if (!rowId) return;
-
-  try {
-    const localCode = localStorage.getItem('latestCode');
-    console.log("Heartbeat sending localStorage code:", localCode);
-
-    const res = await fetch(HEARTBEAT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId, code: localCode })
-    });
-    const data = await res.json();
-
-    if (!data.valid) {
-      if (!gracePeriod) {
-        forceLogout("Detected login from another device via heartbeat");
-      }
-    }
-
-    console.log("Heartbeat check:", data.valid ? "ok" : "invalid");
-
-  } catch(err) {
-    console.error("Heartbeat polling error:", err);
-  }
+async function checkHeartbeat(){
+  if(!rowId) return;
+  try{
+    const localCode=localStorage.getItem('latestCode');
+    const res=await fetch(HEARTBEAT_URL,{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ row_id:rowId, code:localCode }) });
+    const data=await res.json();
+    if(!data.valid && !gracePeriod) forceLogout("Detected login from another device via heartbeat");
+    console.log("Heartbeat check:", data.valid ? "ok":"invalid");
+  }catch(err){ console.error("Heartbeat polling error:", err); }
 }
 </script>
-</body>
-</html>
 </body>
 </html>
