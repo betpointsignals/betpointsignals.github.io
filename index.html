@@ -29,11 +29,15 @@ iframe { width:100%; height:100%; border:none; display:block; }
   margin-top:12px;
   display:none;
 }
-@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 </style>
 </head>
 <body>
 
+<!-- LOGIN -->
 <div id="loginOverlay">
   <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
@@ -43,18 +47,18 @@ iframe { width:100%; height:100%; border:none; display:block; }
   <div id="spinner"></div>
 </div>
 
-<iframe id="appFrame"></iframe>
+<!-- APP -->
+<iframe id="appFrame" src="https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true"></iframe>
 
 <script>
 /* CONFIG */
-const VERIFY_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
-const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
-const CHECK_LAST4 = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
-const HEARTBEAT_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat';
-const APP_URL = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const POLL_MS = 10000;
-const GRACE_MS = 4000;
-const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+const VERIFY_URL       = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
+const REGISTER_URL     = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const CHECK_LAST4      = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const HEARTBEAT_URL    = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat';
+const POLL_MS          = 10000; // 10 seconds
+const GRACE_MS         = 4000;  // 4 seconds grace period for current device
+const deviceType       = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
@@ -62,9 +66,9 @@ let linkId = null;
 let pollInterval = null;
 let gracePeriod = false;
 
-/* AUTO LOGIN */
+/* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', () => {
-  const savedRow = localStorage.getItem('rowId');
+  const savedRow  = localStorage.getItem('rowId');
   const savedLink = localStorage.getItem('linkId');
   const savedCode = localStorage.getItem('latestCode');
 
@@ -72,23 +76,27 @@ window.addEventListener('DOMContentLoaded', () => {
     rowId = savedRow;
     linkId = savedLink;
     console.log("Auto-login detected. Row:", rowId, "Code:", savedCode);
-    unlockApp();
+    hideLoginOverlay();
     initOneSignal(rowId);
     startHeartbeatPolling();
   }
 });
 
-/* LOGIN */
+/* ================= LOGIN ================= */
 async function submitRowId() {
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
   rowId = document.getElementById('rowIdInput').value.trim();
-  if (!rowId) { error.textContent = 'Please enter a password'; return; }
+  if (!rowId) {
+    error.textContent = 'Please enter a password';
+    return;
+  }
 
   error.textContent = '';
   spinner.style.display = 'block';
 
   try {
+    // Verify password
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -104,49 +112,54 @@ async function submitRowId() {
 
     linkId = data.link_id;
 
-    // ✅ Always generate new code
+    // ✅ Generate new code
     const newCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    console.log("Generated code:", newCode);
+
+    // ✅ Save to localStorage
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
     localStorage.setItem('latestCode', newCode);
-    console.log("New login code saved:", newCode);
 
-    // ✅ Send localStorage code to checklast4
+    // ✅ Send the code from localStorage
     const codeToSend = localStorage.getItem('latestCode');
+    console.log("Sending code from localStorage:", codeToSend);
+
     await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ row_id: rowId, code: codeToSend })
     });
 
-    // ✅ Unlock app immediately
-    unlockApp();
+    hideLoginOverlay();
     initOneSignal(rowId);
 
-    // ✅ Start heartbeat
+    // ✅ Start heartbeat polling
     gracePeriod = true;
     setTimeout(() => { gracePeriod = false; }, GRACE_MS);
     startHeartbeatPolling();
 
-  } catch(err) {
-    console.error("Login error:", err);
+  } catch (err) {
+    console.error("submitRowId error:", err);
     error.textContent = 'Server error';
   } finally {
     spinner.style.display = 'none';
   }
 }
 
-/* UI */
-function unlockApp() {
+/* ================= UI ================= */
+function hideLoginOverlay() {
   document.getElementById('loginOverlay').style.display = 'none';
-  const frame = document.getElementById('appFrame');
-  frame.src = APP_URL; // always reset iframe
+}
+
+function showLoginOverlay() {
+  document.getElementById('loginOverlay').style.display = 'flex';
 }
 
 function forceLogout(reason) {
   console.warn("⛔ KICKED:", reason || "Code mismatch");
 
-  // ✅ Clear localStorage
+  // Clear localStorage but DO NOT clear iframe
   localStorage.removeItem('rowId');
   localStorage.removeItem('linkId');
   localStorage.removeItem('latestCode');
@@ -154,15 +167,14 @@ function forceLogout(reason) {
   rowId = null;
   linkId = null;
 
-  // ✅ Show login overlay immediately
-  document.getElementById('loginOverlay').style.display = 'flex';
-  document.getElementById('appFrame').src = '';
+  // Show login overlay
+  showLoginOverlay();
 
   if (pollInterval) clearInterval(pollInterval);
   gracePeriod = false;
 }
 
-/* ONESIGNAL */
+/* ================= ONESIGNAL INIT ================= */
 function initOneSignal(rowId) {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function(OneSignal) {
@@ -183,22 +195,26 @@ function initOneSignal(rowId) {
         body: JSON.stringify({ rowId, linkId, one_signal_id: playerId, device_type: deviceType })
       });
       console.log("External ID set:", rowId, playerId);
-    } catch(err) { console.error("OneSignal error:", err); }
+    } catch(err) {
+      console.error("OneSignal init error:", err);
+    }
   });
 }
 
-/* HEARTBEAT */
+/* ================= HEARTBEAT POLLING ================= */
 function startHeartbeatPolling() {
   if (pollInterval) clearInterval(pollInterval);
-  checkHeartbeat(); // immediate
+  checkHeartbeat(); // immediate check
   pollInterval = setInterval(checkHeartbeat, POLL_MS);
 }
 
 async function checkHeartbeat() {
   if (!rowId) return;
-  const localCode = localStorage.getItem('latestCode');
 
   try {
+    const localCode = localStorage.getItem('latestCode');
+    console.log("Heartbeat sending localStorage code:", localCode);
+
     const res = await fetch(HEARTBEAT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -206,16 +222,20 @@ async function checkHeartbeat() {
     });
     const data = await res.json();
 
-    if (!data.valid && !gracePeriod) {
-      forceLogout("Detected login from another device via heartbeat");
+    if (!data.valid) {
+      if (!gracePeriod) {
+        forceLogout("Detected login from another device via heartbeat");
+      }
     }
 
     console.log("Heartbeat check:", data.valid ? "ok" : "invalid");
 
   } catch(err) {
-    console.error("Heartbeat error:", err);
+    console.error("Heartbeat polling error:", err);
   }
 }
 </script>
+</body>
+</html>
 </body>
 </html>
